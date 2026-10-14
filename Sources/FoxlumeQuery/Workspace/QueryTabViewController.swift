@@ -28,12 +28,17 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     private lazy var stopButton = UI.button("Stop", symbol: "stop.fill", target: self, action: #selector(cancelQuery(_:)))
     private lazy var exportButton = UI.button("Export", symbol: "square.and.arrow.up", target: self, action: #selector(exportResults(_:)))
     private lazy var formatButton = UI.button("Format", symbol: "text.alignleft", target: self, action: #selector(formatQuery(_:)))
+    /// Explain and Explain Analyze; see QueryTabViewController+Explain.swift.
+    private(set) lazy var explainControl = makeExplainControl()
     /// Goes up the responder chain to the window, which owns the saved queries.
     private lazy var saveQueryButton = UI.iconButton("star", tooltip: "Add to Saved Queries (⌘D)", target: nil, action: #selector(FoxlumeQueryActions.addToSavedQueries(_:)))
 
     private var results: [StatementResult] = []
     private var runError: Error?
-    private var isRunning = false
+    /// The last Explain's output, shown instead of results until the next run.
+    private(set) var explainOutcome: ExplainOutcome?
+    let planView = QueryPlanView()
+    private(set) var isRunning = false
     private var runStarted: Date?
     private var totalElapsed: TimeInterval = 0
 
@@ -72,7 +77,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         formatButton.toolTip = "Format the selection or the whole query (⇧⌘L)"
         formatButton.isHidden = !workspace.kind.isSQL
         saveQueryButton.setAccessibilityIdentifier("addToSavedQueries")
-        let toolbar = UI.hstack([runButton, runAllButton, stopButton, UI.separator(vertical: true), formatButton, saveQueryButton, UI.flexibleSpace(), limitLabel], spacing: 6)
+        let toolbar = UI.hstack([runButton, runAllButton, stopButton, explainControl, UI.separator(vertical: true), formatButton, saveQueryButton, UI.flexibleSpace(), limitLabel], spacing: 6)
         let toolbarContainer = NSView()
         toolbarContainer.translatesAutoresizingMaskIntoConstraints = false
         toolbarContainer.addSubviewFilling(toolbar, insets: NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10))
@@ -128,6 +133,8 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         let resultsBody = NSView()
         resultsBody.addSubviewFilling(grid)
         resultsBody.addSubviewFilling(messageScroll)
+        resultsBody.addSubviewFilling(planView)
+        planView.isHidden = true
 
         let resultsPane = NSView()
         let headerLine = UI.separator()
@@ -266,18 +273,18 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     // MARK: Running
 
     @objc func runCurrent(_ sender: Any?) {
+        guard let statement = currentStatement() else { return NSSound.beep() }
+        run(statement)
+    }
+
+    /// The selection, or else the statement at the caret (highlighted), as Run Statement and Explain pick it.
+    func currentStatement() -> String? {
         let selection = editor.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !selection.isEmpty {
-            run(selection)
-            return
-        }
+        if !selection.isEmpty { return selection }
         let location = editor.textView.selectedRange().location
-        guard let statement = workspace.queryLanguage.statement(at: location, in: editor.string) else {
-            NSSound.beep()
-            return
-        }
+        guard let statement = workspace.queryLanguage.statement(at: location, in: editor.string) else { return nil }
         editor.highlightRange(statement.range)
-        run(statement.text)
+        return statement.text
     }
 
     /// Runs the selection or current statement and keeps every row, ignoring the row limit.
@@ -347,6 +354,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     private func execute(_ sql: String, limit: Int?) {
         isRunning = true
         runError = nil
+        explainOutcome = nil
         runStarted = Date()
         updateRunningState()
         let token = QueryToken()
@@ -367,10 +375,46 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         }
     }
 
+    /// Runs a request built in QueryTabViewController+Explain.swift the way `execute` runs statements: cancellable
+    /// with Stop, and its plan replaces the results.
+    func runExplain(_ request: ExplainRequest) {
+        isRunning = true
+        runError = nil
+        runStarted = Date()
+        updateRunningState()
+        let token = QueryToken()
+        runToken = token
+        Task {
+            do {
+                explainOutcome = try await workspace.explain(request, token: token)
+            } catch {
+                explainOutcome = nil
+                runError = error
+            }
+            results = []
+            totalElapsed = Date().timeIntervalSince(runStarted ?? Date())
+            runToken = nil
+            isRunning = false
+            updateRunningState()
+            renderResults()
+        }
+    }
+
+    /// Shows why an Explain did not run, in place of the results.
+    func showExplainRefusal(_ error: Error) {
+        explainOutcome = nil
+        results = []
+        runError = error
+        runStarted = runStarted ?? Date()
+        renderResults()
+        statusLabel.stringValue = "Not run"
+    }
+
     private func updateRunningState() {
         runButton.isEnabled = !isRunning
         runAllButton.isEnabled = !isRunning
         stopButton.isEnabled = isRunning
+        updateExplainControl()
         if isRunning {
             spinner.startAnimation(nil)
             statusLabel.stringValue = "Running…"
@@ -383,11 +427,22 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
 
     private func renderResults() {
         resultPicker.segmentCount = 0
+        planView.isHidden = true
         if let runError {
             showMessages(NSAttributedString(string: runError.localizedDescription, attributes: [.foregroundColor: NSColor.systemRed, .font: Theme.monospaced(12)]))
             resultPicker.isHidden = true
             statusLabel.stringValue = "Error · \(totalElapsed.durationText)"
             exportButton.isEnabled = false
+            return
+        }
+        if let explainOutcome {
+            planView.show(explainOutcome)
+            planView.isHidden = false
+            grid.isHidden = true
+            messageScroll.isHidden = true
+            resultPicker.isHidden = true
+            exportButton.isEnabled = false
+            statusLabel.stringValue = "\(explainOutcome.request.mode.title) · \(explainOutcome.elapsed.durationText)"
             return
         }
         guard !results.isEmpty else {
@@ -425,6 +480,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
             grid.setContent(DataGridContent(columns: result.columns, rows: result.rows), localSort: true)
             grid.isHidden = false
             messageScroll.isHidden = true
+            planView.isHidden = true
             exportButton.isEnabled = true
             var text = "\(result.rows.count.groupedText) row\(result.rows.count == 1 ? "" : "s")"
             if result.truncated { text += " (limited)" }
@@ -452,6 +508,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         messageView.textStorage?.setAttributedString(text)
         messageScroll.isHidden = false
         grid.isHidden = true
+        planView.isHidden = true
     }
 
     var currentResult: StatementResult? {

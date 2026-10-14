@@ -93,6 +93,8 @@ final class AutoTestRunner {
             try await performTransfer(command, argument)
         case _ where SavedQueriesAutoTest.commands.contains(command):
             try await performSavedQueries(command, argument)
+        case _ where ExplainAutoTest.commands.contains(command):
+            try await performExplain(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
             for window in NSApp.windows {

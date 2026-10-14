@@ -180,14 +180,15 @@ public final class DatabaseSession: @unchecked Sendable {
         }
     }
 
-    private func begin(_ token: QueryToken?) throws {
+    /// Marks `token`'s statement as running, or fails when it was cancelled while queued. Call on the session queue.
+    func begin(_ token: QueryToken?) throws {
         try withState {
             if let token, token.isCancelled { throw DatabaseError.cancelled }
             activeToken = token
         }
     }
 
-    private func end(_ token: QueryToken?) {
+    func end(_ token: QueryToken?) {
         withState {
             if activeToken === token { activeToken = nil }
         }

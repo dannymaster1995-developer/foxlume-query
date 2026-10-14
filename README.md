@@ -52,6 +52,12 @@ they have had less testing and some features are missing.
 - Highlighting for SQL, MongoDB shell commands and Redis commands.
 - Context-aware completion: the SQL analyzer knows the clause, the tables and aliases in scope, CTEs and subqueries, and offers tables, columns (with type and key details), functions with signatures, keywords and operators for the connection's dialect, quoting names where needed. Keyword case follows a setting. MongoDB completion knows collections, methods, operators and sampled document fields; Redis completion knows commands, options and key names. The filter bar's raw SQL box completes too.
 - Run the statement under the caret (⌘↩), everything (⇧⌘↩) or without the row limit (⌥⌘↩); cancel with ⌘.; format SQL with ⇧⌘L. The row limit is applied by the server on PostgreSQL and MySQL, so large results never cross the network in full.
+- Explain (⌥⌘E) and Explain Analyze (⌃⌘E) for the statement under the caret or the selection: the plan as a tree with
+  each step's object, share of the work, cost, estimated and actual rows, time and loops, expensive steps marked,
+  warnings (row estimates far off, large filtered scans, sorts and hashes spilled to disk), every property of the
+  selected step, and the server's raw output. PostgreSQL and MySQL; SQLite, DuckDB, MariaDB and MongoDB in beta.
+  Explain Analyze really runs the statement: on PostgreSQL inside a transaction that is rolled back, elsewhere only
+  for statements that read data, and never for writes on read-only connections.
 - Confirmation before UPDATE or DELETE without WHERE, and before writes on Production connections (both can be turned off in Settings).
 - Open and save `.sql` files.
 - Saved queries (⌘D, or the star in a query tab): a "Saved Queries" side of the sidebar with nested folders, kept for one connection or shared with all of them. Each can have a keyword: typing it in the editor offers the query, and `;;` in its SQL marks where the cursor lands. Saved queries never run on their own; Run goes through the normal run path, Safe Mode included.
@@ -62,7 +68,7 @@ they have had less testing and some features are missing.
 - Open Quickly (⇧⌘O): one fuzzy search over tables and views (all schemas), databases, schemas, saved queries and recent history, with the tables, saved queries and history of the other open connections. Results rank by match and by how often and recently you opened them.
 - Open tabs come back when you reopen a connection; ⇧⌘T reopens a closed tab.
 
-**Not there yet:** SQL Server and many other engines, Explain plans, ER diagrams, JSON and XLSX import. TLS connections are limited to TLS 1.2 for now.
+**Not there yet:** SQL Server and many other engines, a graphical plan diagram, ER diagrams, JSON and XLSX import. TLS connections are limited to TLS 1.2 for now.
 
 ## Building from source
 
@@ -123,6 +129,7 @@ Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords inc
 | ⌘↩ / ⇧⌘↩ / ⌥⌘↩ | Run statement / run all / run without limit |
 | ⌘. | Cancel query |
 | ⇧⌘L | Format SQL |
+| ⌥⌘E / ⌃⌘E | Explain / Explain Analyze |
 | ⌃Space | Show completions |
 | ⌘S | Save (staged truncates and drops, grid edits, or the SQL file) |
 | ⇧⌘P | Preview SQL |
@@ -160,6 +167,7 @@ Sources/
     Completion/         query editor completion engines
     Storage/            connections, Keychain, history, saved queries, settings
     Search/             Open Quickly matching, ranking and recency
+    Explain/            query plan model, parsers per engine, analysis and the Explain runner
     Theme/              built-in themes, VS Code theme import
     Export/             result export, table export and SQL dumps
     Import/             CSV import, SQL file runner, text decoding

@@ -297,7 +297,7 @@ final class ConnectionWorkspace {
     }
 
     /// Counts the operation as running so the toolbar shows activity, after making sure the link is up.
-    private func tracked<T>(_ body: () async throws -> T) async throws -> T {
+    func tracked<T>(_ body: () async throws -> T) async throws -> T {
         try await ensureConnected()
         runningStatements += 1
         NotificationCenter.default.post(name: Self.activityDidChange, object: self)

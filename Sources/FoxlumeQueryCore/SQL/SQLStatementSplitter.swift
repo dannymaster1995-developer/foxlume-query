@@ -241,6 +241,10 @@ public extension SQLStatementSplitter {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
         guard let first = words.first, readOnlyKeywords.contains(first) else { return false }
+        // EXPLAIN only plans the statement it describes; with ANALYZE it runs it, so it writes when that statement does.
+        if first == "EXPLAIN", !words.contains("ANALYZE"), !words.contains("ANALYSE") {
+            return true
+        }
         if first == "WITH" || first == "EXPLAIN" {
             let writes: Set<String> = ["INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE", "DROP", "ALTER", "CREATE"]
             return !words.contains(where: writes.contains)

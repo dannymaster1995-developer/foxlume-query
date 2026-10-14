@@ -33,6 +33,8 @@ import AppKit
     @objc optional func formatQuery(_ sender: Any?)
     @objc optional func promptConnectionURL(_ sender: Any?)
     @objc optional func runWithoutLimit(_ sender: Any?)
+    @objc optional func explainQuery(_ sender: Any?)
+    @objc optional func explainAnalyzeQuery(_ sender: Any?)
     @objc optional func duplicateRows(_ sender: Any?)
     @objc optional func previousPage(_ sender: Any?)
     @objc optional func nextPage(_ sender: Any?)
@@ -119,6 +121,8 @@ enum MainMenu {
             item("Run All", #selector(FoxlumeQueryActions.runAll(_:)), "\r", [.command, .shift]),
             item("Run Without Limit", #selector(FoxlumeQueryActions.runWithoutLimit(_:)), "\r", [.command, .option]),
             item("Cancel Query", #selector(FoxlumeQueryActions.cancelQuery(_:)), "."),
+            item("Explain", #selector(FoxlumeQueryActions.explainQuery(_:)), "e", [.command, .option]),
+            item("Explain Analyze", #selector(FoxlumeQueryActions.explainAnalyzeQuery(_:)), "e", [.command, .control]),
             item("Format Query", #selector(FoxlumeQueryActions.formatQuery(_:)), "l", [.command, .shift]),
             item("Add to Saved Queries…", #selector(FoxlumeQueryActions.addToSavedQueries(_:)), "d"),
             .separator(),
