@@ -123,7 +123,7 @@ final class FilterHarness {
         bar.autoresizingMask = [.width, .height]
         window.contentView!.addSubview(bar)
         bar.configure(columns: ["id", "name"], rules: [], rawWhere: "", capabilities: .relational(.postgresql))
-        bar.onApply = { [weak self] _, raw in self?.applied.append(raw) }
+        bar.onApply = { [weak self] _, raw, _ in self?.applied.append(raw) }
         bar.rawCompletion = FilterBarView.RawCompletion(
             complete: { [weak self] fragment, caret in self?.answer(fragment, caret) },
             refilter: { result, token in

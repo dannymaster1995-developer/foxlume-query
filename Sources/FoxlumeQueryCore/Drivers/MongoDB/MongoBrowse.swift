@@ -260,8 +260,11 @@ enum MongoCellCodec {
 
 /// Builds a `find` filter from the filter bar rules.
 enum MongoFilterBuilder {
-    static func filter(rules: [FilterRule], fieldTypes: [String: String], raw: BSONDocument?) -> BSONDocument {
+    static func filter(rules: [FilterRule], logic: FilterLogic = .and, fieldTypes: [String: String], raw: BSONDocument?) -> BSONDocument {
         var conditions: [BSONDocument] = rules.compactMap { condition(for: $0, typeName: fieldTypes[$0.column]) }
+        if logic == .or, conditions.count > 1 {
+            conditions = [["$or": .array(conditions.map { .document($0) })]]
+        }
         if let raw, !raw.isEmpty { conditions.append(raw) }
         switch conditions.count {
         case 0: return [:]
@@ -288,20 +291,43 @@ enum MongoFilterBuilder {
         case .greaterOrEqual: return operation("$gte", primary)
         case .lessThan: return operation("$lt", primary)
         case .lessOrEqual: return operation("$lte", primary)
-        case .contains: return [field: regex(escape(rule.value))]
-        case .notContains: return operation("$not", regex(escape(rule.value)))
-        case .startsWith: return [field: regex("^" + escape(rule.value))]
-        case .endsWith: return [field: regex(escape(rule.value) + "$")]
+        case .contains: return [field: regex(escape(rule.value), rule)]
+        case .notContains: return operation("$not", regex(escape(rule.value), rule))
+        case .startsWith: return [field: regex("^" + escape(rule.value), rule)]
+        case .endsWith: return [field: regex(escape(rule.value) + "$", rule)]
+        case .regex:
+            guard !rule.value.isEmpty else { return nil }
+            return [field: regex(rule.value, rule)]
         case .isNull: return [field: .null]
         case .isNotNull: return operation("$ne", .null)
-        case .inList:
-            let items = rule.value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            guard !items.isEmpty else { return nil }
-            return operation("$in", .array(items.flatMap { typedValues($0, typeName: typeName) }))
+        case .isEmpty: return operation("$in", .array([.null, .string("")]))
+        case .isNotEmpty: return operation("$nin", .array([.null, .string("")]))
+        case .inList, .notInList:
+            let (items, hasNull) = FilterRule.listItems(rule.value)
+            guard !items.isEmpty || hasNull else { return nil }
+            let values = items.flatMap { typedValues($0, typeName: typeName) } + (hasNull ? [.null] : [])
+            return operation(rule.op == .inList ? "$in" : "$nin", .array(values))
+        case .between, .notBetween:
+            guard !rule.value.isEmpty, !rule.secondValue.isEmpty else { return nil }
+            let lower = bound(rule.value, typeName: typeName)
+            let upper = bound(rule.secondValue, typeName: typeName)
+            if rule.op == .between {
+                return [field: .document(["$gte": lower, "$lte": upper])]
+            }
+            return ["$or": .array([.document([field: .document(["$lt": lower])]), .document([field: .document(["$gt": upper])])])]
         }
     }
 
-    private static func regex(_ pattern: String) -> BSONValue { .regex(pattern: pattern, options: "i") }
+    /// Text operators ignore case unless the rule asks to match it.
+    private static func regex(_ pattern: String, _ rule: FilterRule) -> BSONValue {
+        .regex(pattern: pattern, options: rule.matchCase ? "" : "i")
+    }
+
+    /// A range bound: the typed value when the text reads as one, else the text.
+    private static func bound(_ text: String, typeName: String?) -> BSONValue {
+        let candidates = typedValues(text, typeName: typeName)
+        return candidates.first { $0.stringValue == nil } ?? candidates.first ?? .string(text)
+    }
 
     static func escape(_ text: String) -> String {
         var out = ""
@@ -432,7 +458,7 @@ extension MongoConnection {
 
     func filter(for query: TableQuery, schema: MongoSampledSchema) throws -> BSONDocument {
         let types = Dictionary(schema.fields.map { ($0.name, $0.typeName) }, uniquingKeysWith: { first, _ in first })
-        return MongoFilterBuilder.filter(rules: query.filters, fieldTypes: types, raw: try parseRawFilter(query.rawWhere))
+        return MongoFilterBuilder.filter(rules: query.filters, logic: query.filterLogic, fieldTypes: types, raw: try parseRawFilter(query.rawWhere))
     }
 
     public func fetchRows(_ query: TableQuery) throws -> StatementResult {

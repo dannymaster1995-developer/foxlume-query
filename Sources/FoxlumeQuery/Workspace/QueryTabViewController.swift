@@ -17,11 +17,13 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     private let initialSQL: String
     private let editor = SQLEditorView()
     private let split = NSSplitView()
-    private let grid = DataGridView()
+    let grid = DataGridView()
     private let messageView = NSTextView()
     private let messageScroll = NSScrollView()
     private let resultPicker = NSSegmentedControl()
     private let statusLabel = UI.label("", size: 11, color: .secondaryLabelColor)
+    /// Count, sum, average, minimum and maximum of the selected cells.
+    private let selectionLabel = UI.label("", size: 11, color: .secondaryLabelColor)
     private let spinner = NSProgressIndicator()
     private lazy var runButton = UI.button("Run", symbol: "play.fill", target: self, action: #selector(runCurrent(_:)))
     private lazy var runAllButton = UI.button("Run All", target: self, action: #selector(runAll(_:)))
@@ -98,6 +100,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
 
         grid.delegate = self
         grid.isEditable = false
+        grid.readOnlyReason = "Query results are read-only. Open the table to edit its rows."
         grid.dialectForCopy = workspace.dialect
         grid.showsRowNumbers = AppEnvironment.settings.showRowNumbers
 
@@ -125,7 +128,9 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         statusLabel.setAccessibilityIdentifier("queryStatus")
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let resultsHeader = UI.hstack([resultPicker, UI.flexibleSpace(), spinner, statusLabel, exportButton], spacing: 8)
+        selectionLabel.setAccessibilityIdentifier("querySelectionSummary")
+        selectionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let resultsHeader = UI.hstack([resultPicker, UI.flexibleSpace(), selectionLabel, spinner, statusLabel, exportButton], spacing: 8)
         let resultsHeaderContainer = NSView()
         resultsHeaderContainer.translatesAutoresizingMaskIntoConstraints = false
         resultsHeaderContainer.addSubviewFilling(resultsHeader, insets: NSEdgeInsets(top: 5, left: 10, bottom: 5, right: 10))
@@ -574,7 +579,9 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
 }
 
 extension QueryTabViewController: DataGridViewDelegate {
-    func dataGridSelectionDidChange(_ grid: DataGridView) {}
+    func dataGridSelectionDidChange(_ grid: DataGridView) {
+        selectionLabel.stringValue = grid.selectionStatistics?.summary ?? ""
+    }
 }
 
 extension QueryTabViewController: SQLCompletionProvider {

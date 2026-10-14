@@ -35,6 +35,8 @@ public enum AppPaths {
     public static var settingsFile: URL { dataDirectory.appendingPathComponent("settings.json") }
     public static var historyDatabase: URL { dataDirectory.appendingPathComponent("history.sqlite") }
     public static var savedQueriesFile: URL { dataDirectory.appendingPathComponent("saved-queries.json") }
+    /// Saved filter presets, per table.
+    public static var filterPresetsFile: URL { dataDirectory.appendingPathComponent("filter-presets.json") }
     /// What Open Quickly remembers about recently chosen items, per connection.
     public static var openQuicklyFile: URL { dataDirectory.appendingPathComponent("open-quickly.json") }
     /// Host keys accepted for SSH tunnels, kept apart from the user's own ~/.ssh/known_hosts.

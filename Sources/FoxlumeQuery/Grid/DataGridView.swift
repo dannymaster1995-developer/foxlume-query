@@ -12,6 +12,12 @@ protocol DataGridViewDelegate: AnyObject {
     func dataGrid(_ grid: DataGridView, followReferenceAtRow row: Int, column: Int)
     /// "Search All Rows" in the find bar: filter on the server to rows where any column contains `text`.
     func dataGrid(_ grid: DataGridView, searchServerFor text: String)
+    /// Several cells set at once (Set NULL on a range, Fill), recorded as one undoable step.
+    func dataGrid(_ grid: DataGridView, didEditCells edits: [GridCellEdit], actionName: String)
+    /// A clipboard block to stage: cell values, and whole rows to add (nil fields take the column default).
+    func dataGrid(_ grid: DataGridView, paste edits: [GridCellEdit], newRows: [[CellValue?]])
+    /// "Filter with Column" in the header menu.
+    func dataGrid(_ grid: DataGridView, filterColumn column: Int)
 }
 
 extension DataGridViewDelegate {
@@ -22,6 +28,18 @@ extension DataGridViewDelegate {
     func dataGrid(_ grid: DataGridView, followReferenceAtRow row: Int, column: Int) {}
     func dataGrid(_ grid: DataGridView, searchServerFor text: String) {}
     func dataGrid(_ grid: DataGridView, extraMenuItemsFor rows: IndexSet) -> [NSMenuItem] { [] }
+    func dataGrid(_ grid: DataGridView, didEditCells edits: [GridCellEdit], actionName: String) {
+        for edit in edits { dataGrid(grid, didEditRow: edit.row, column: edit.column, value: edit.value) }
+    }
+    func dataGrid(_ grid: DataGridView, paste edits: [GridCellEdit], newRows: [[CellValue?]]) {}
+    func dataGrid(_ grid: DataGridView, filterColumn column: Int) {}
+}
+
+/// A new value for one cell: display row and data column.
+struct GridCellEdit: Equatable {
+    var row: Int
+    var column: Int
+    var value: CellValue
 }
 
 /// What the grid shows: loaded rows, plus unsaved edits drawn on top of them.
@@ -60,10 +78,27 @@ final class DataGridView: NSView {
     private let scrollView = NSScrollView()
     let tableView = GridTableView()
     private(set) var content = DataGridContent()
-    private var isLocalSortEnabled = false
+    private(set) var isLocalSortEnabled = false
+    /// The sort the header shows. For local sorting it is also what orders `content.rows`.
+    var sortKeys: [SortKey] = []
+    /// Query results in the order they arrived, so turning the local sort off restores it.
+    var arrivalRows: [[CellValue]] = []
+
+    // Cell selection state (see DataGridView+CellSelection.swift).
+    var cellSelection = GridSelection.empty
+    /// Set while the grid itself selects table rows to match the cell selection.
+    var isSyncingRowSelection = false
+    /// Data column indexes in on-screen order; rebuilt after columns change or move.
+    var displayOrderCache: [Int]?
+    /// Why paste and fill are refused when the grid is not editable, for the alert.
+    var readOnlyReason: String?
+    /// The message of the last refused paste or fill, for tests and scripted checks.
+    var lastRefusal: String?
 
     /// When false, header clicks do not sort (Redis key lists are always sorted by key).
     var allowsColumnSort = true
+    /// Offer "Filter with Column" in the header menu (table tabs with column filters).
+    var allowsColumnFilter = false
     /// Columns that are never editable, such as MongoDB `_id`.
     var immutableColumns: Set<String> = []
 
@@ -98,7 +133,12 @@ final class DataGridView: NSView {
 
     /// The cell and rows a context menu was opened on. Menu commands act on these; keyboard commands use the selection.
     private(set) var contextCell: (row: Int, tableColumn: Int)?
-    private var contextRows: IndexSet?
+    private(set) var contextRows: IndexSet?
+    /// The context menu was opened on a cell inside the cell selection, so its commands act on the selection.
+    var contextCellIsSelected: Bool {
+        guard let contextCell, let position = displayPosition(ofTableColumn: contextCell.tableColumn) else { return false }
+        return cellSelection.contains(GridCell(row: contextCell.row, column: position))
+    }
     var showsRowNumbers = true {
         didSet { rowNumberColumn?.isHidden = !showsRowNumbers }
     }
@@ -141,6 +181,10 @@ final class DataGridView: NSView {
         tableView.allowsMultipleSelection = true
         tableView.allowsColumnReordering = true
         tableView.allowsColumnResizing = true
+        tableView.allowsColumnSelection = false
+        let header = GridHeaderView(frame: tableView.headerView?.frame ?? NSRect(x: 0, y: 0, width: 100, height: 24))
+        header.grid = self
+        tableView.headerView = header
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
         tableView.style = .plain
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
@@ -188,7 +232,18 @@ final class DataGridView: NSView {
         let columnsChanged = newContent.columns.map(\.name) != content.columns.map(\.name) || tableView.tableColumns.isEmpty
         content = newContent
         isLocalSortEnabled = localSort
+        let hadCellSelection = !cellSelection.isEmpty
+        cellSelection = .empty
+        defer { if hadCellSelection { delegate?.dataGridSelectionDidChange(self) } }
+        if localSort {
+            arrivalRows = newContent.rows
+            // A re-run keeps the sort while its columns are still there, as in TablePro.
+            let names = Set(newContent.columns.map(\.name))
+            sortKeys = sortKeys.filter { names.contains($0.column) }
+            applyLocalSort()
+        }
         if columnsChanged { rebuildColumns() }
+        updateHeaderIndicators()
         refreshFindMatches(keepPosition: false)
         tableView.reloadData()
     }
@@ -199,23 +254,18 @@ final class DataGridView: NSView {
         content.changes = changes
         if oldCount != content.displayRowCount {
             tableView.noteNumberOfRowsChanged()
+            var selection = cellSelection
+            selection.clamp(rowCount: content.displayRowCount, columnCount: content.columns.count)
+            if selection != cellSelection { setCellSelection(selection) }
         }
         tableView.reloadData(forRowIndexes: IndexSet(integersIn: 0..<content.displayRowCount), columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns))
     }
 
     /// Shows the sort arrows without reporting a sort change back to the delegate.
     func setSortIndicator(_ sort: [SortKey]) {
-        let descriptors = sort.compactMap { key -> NSSortDescriptor? in
-            guard let index = content.columns.firstIndex(where: { $0.name == key.column }) else { return nil }
-            return NSSortDescriptor(key: "c\(index)", ascending: key.ascending)
-        }
-        guard descriptors != tableView.sortDescriptors else { return }
-        isApplyingSortIndicator = true
-        tableView.sortDescriptors = descriptors
-        isApplyingSortIndicator = false
+        sortKeys = sort
+        updateHeaderIndicators()
     }
-
-    private var isApplyingSortIndicator = false
 
     var selectedRows: IndexSet { tableView.selectedRowIndexes }
 
@@ -235,6 +285,7 @@ final class DataGridView: NSView {
         for column in tableView.tableColumns.reversed() {
             tableView.removeTableColumn(column)
         }
+        displayOrderCache = nil
         let numberColumn = NSTableColumn(identifier: Self.rowNumberIdentifier)
         numberColumn.title = "#"
         numberColumn.width = rowNumberWidth()
@@ -246,14 +297,12 @@ final class DataGridView: NSView {
 
         for (index, column) in content.columns.enumerated() {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("c\(index)"))
+            tableColumn.headerCell = GridHeaderCell(textCell: column.name)
             tableColumn.title = column.name
             tableColumn.headerToolTip = column.typeName.isEmpty ? column.name : "\(column.name) · \(column.typeName)"
             tableColumn.width = idealWidth(for: index)
             tableColumn.minWidth = 40
             tableColumn.maxWidth = 2000
-            if allowsColumnSort {
-                tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: tableColumn.identifier.rawValue, ascending: true)
-            }
             tableView.addTableColumn(tableColumn)
         }
     }
@@ -293,7 +342,7 @@ final class DataGridView: NSView {
         }
     }
 
-    fileprivate func dataColumnIndex(_ tableColumn: NSTableColumn?) -> Int? {
+    func dataColumnIndex(_ tableColumn: NSTableColumn?) -> Int? {
         guard let identifier = tableColumn?.identifier.rawValue, identifier.hasPrefix("c") else { return nil }
         return Int(identifier.dropFirst())
     }
@@ -316,7 +365,11 @@ final class DataGridView: NSView {
     func beginEditing(row: Int, tableColumn: Int) {
         guard isEditable, let column = dataColumnIndex(atTableColumn: tableColumn), !isImmutable(column) else { return }
         guard !content.changes.deletions.contains(row) else { NSSound.beep(); return }
-        tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        if let position = displayPosition(ofDataColumn: column) {
+            setCellSelection(.single(GridCell(row: row, column: position)))
+        } else {
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
         guard let cell = tableView.view(atColumn: tableColumn, row: row, makeIfNecessary: true) as? GridCellView else { return }
         cell.prepareForEditing()
         tableView.editColumn(tableColumn, row: row, with: nil, select: true)
@@ -336,11 +389,10 @@ final class DataGridView: NSView {
         delegate?.dataGrid(self, didEditRow: row, column: column, value: newValue)
     }
 
-    fileprivate func setSelectedCells(to value: CellValue) {
-        guard let cell = targetCell, let dataColumn = dataColumnIndex(atTableColumn: cell.tableColumn) else { return }
-        for row in targetRows() {
-            delegate?.dataGrid(self, didEditRow: row, column: dataColumn, value: value)
-        }
+    fileprivate func setSelectedCells(to value: CellValue, actionName: String) {
+        let edits = targetCellsForEditing().map { GridCellEdit(row: $0.row, column: $0.column, value: value) }
+        guard !edits.isEmpty else { return NSSound.beep() }
+        delegate?.dataGrid(self, didEditCells: edits, actionName: actionName)
     }
 
     // MARK: - Copy
@@ -350,8 +402,11 @@ final class DataGridView: NSView {
     }
 
     /// Row and table column for single-cell commands: the context-menu cell, else the selection.
-    private var targetCell: (row: Int, tableColumn: Int)? {
+    var targetCell: (row: Int, tableColumn: Int)? {
         if let contextCell { return contextCell }
+        if let active = cellSelection.active, let tableColumn = tableColumnIndex(ofDisplayPosition: active.column) {
+            return (active.row, tableColumn)
+        }
         guard tableView.selectedRow >= 0 else { return nil }
         return (tableView.selectedRow, tableView.lastClickedColumn > 0 ? tableView.lastClickedColumn : 1)
     }
@@ -372,6 +427,9 @@ final class DataGridView: NSView {
     }
 
     @objc func copy(_ sender: Any?) {
+        if !cellSelection.isEmpty, contextRows == nil || contextCellIsSelected {
+            return copyCellSelection(includeHeader: false)
+        }
         copyRows(format: .tsv)
     }
 
@@ -405,42 +463,37 @@ final class DataGridView: NSView {
         editor.present(in: window)
     }
 
-    @objc func copyWithHeader(_ sender: Any?) { copyRows(format: .tsv, includeHeader: true) }
+    @objc func copyWithHeader(_ sender: Any?) {
+        if !cellSelection.isEmpty, contextRows == nil || contextCellIsSelected {
+            return copyCellSelection(includeHeader: true)
+        }
+        copyRows(format: .tsv, includeHeader: true)
+    }
+    @objc private func copyRowsAsTSV(_ sender: Any?) { copyRows(format: .tsv) }
     @objc private func copyAsCSV(_ sender: Any?) { copyRows(format: .csv, includeHeader: true) }
     @objc func copyAsJSON(_ sender: Any?) { copyRows(format: .json) }
     @objc private func copyAsSQL(_ sender: Any?) { copyRows(format: .sqlInsert) }
     @objc private func copyAsMarkdown(_ sender: Any?) { copyRows(format: .markdown) }
-    @objc private func setNull(_ sender: Any?) { setSelectedCells(to: .null) }
-    @objc private func setEmpty(_ sender: Any?) { setSelectedCells(to: .text("")) }
-    @objc private func setDefault(_ sender: Any?) { setSelectedCells(to: .expression("DEFAULT")) }
-    @objc private func setCurrentTimestamp(_ sender: Any?) { setSelectedCells(to: .expression("CURRENT_TIMESTAMP")) }
+    @objc private func setNull(_ sender: Any?) { setSelectedCells(to: .null, actionName: "Set NULL") }
+    @objc private func setEmpty(_ sender: Any?) { setSelectedCells(to: .text(""), actionName: "Set Empty String") }
+    @objc private func setDefault(_ sender: Any?) { setSelectedCells(to: .expression("DEFAULT"), actionName: "Set DEFAULT") }
+    @objc private func setCurrentTimestamp(_ sender: Any?) { setSelectedCells(to: .expression("CURRENT_TIMESTAMP"), actionName: "Set Current Timestamp") }
     @objc fileprivate func deleteRows(_ sender: Any?) { delegate?.dataGridDeleteSelectedRows(self) }
 
     // MARK: - Local sort (query results)
 
-    private func applyLocalSort(column: Int, ascending: Bool) {
-        guard content.columns.indices.contains(column) else { return }
-        let numeric = content.columns[column].isNumeric
-        content.rows.sort { lhs, rhs in
-            let ordered = Self.compare(lhs[safe: column] ?? .null, rhs[safe: column] ?? .null, numeric: numeric)
-            return ascending ? ordered == .orderedAscending : ordered == .orderedDescending
+    /// Orders `content.rows` by `sortKeys`, several keys and stable; no keys restores the order the rows arrived in.
+    func applyLocalSort() {
+        guard isLocalSortEnabled else { return }
+        let keys = sortKeys.compactMap { key -> LocalRowSort.Key? in
+            guard let index = content.columns.firstIndex(where: { $0.name == key.column }) else { return nil }
+            return LocalRowSort.Key(column: index, ascending: key.ascending, numeric: content.columns[index].isNumeric)
         }
-        tableView.reloadData()
+        content.rows = LocalRowSort.order(arrivalRows, by: keys).map { arrivalRows[$0] }
     }
 
     static func compare(_ lhs: CellValue, _ rhs: CellValue, numeric: Bool) -> ComparisonResult {
-        switch (lhs, rhs) {
-        case (.null, .null): return .orderedSame
-        case (.null, _): return .orderedAscending
-        case (_, .null): return .orderedDescending
-        default:
-            let a = lhs.displayString
-            let b = rhs.displayString
-            if numeric, let x = Double(a), let y = Double(b) {
-                return x < y ? .orderedAscending : (x > y ? .orderedDescending : .orderedSame)
-            }
-            return a.localizedStandardCompare(b)
-        }
+        LocalRowSort.compare(lhs, rhs, numeric: numeric)
     }
 }
 
@@ -464,12 +517,14 @@ extension DataGridView: NSTableViewDataSource, NSTableViewDelegate {
             cell.configure(text: String(content.rowOffset + row + 1), style: .rowNumber, state: state, editable: false)
             cell.setReference(visible: false, action: nil)
             cell.setFindHighlight(.none)
+            cell.setSelectionMark(selectionMark(row: row, tableColumn: tableColumn))
             return cell
         }
         guard let column = dataColumnIndex(tableColumn) else { return nil }
         if !inserted, content.changes.isModified(row: row, column: column), !deleted {
             state = .modified
         }
+        defer { cell.setSelectionMark(selectionMark(row: row, tableColumn: tableColumn)) }
         let editable = isEditable && !deleted && !isImmutable(column)
         if let value = content.currentValue(row: row, column: column) {
             let isExpression: Bool = { if case .expression = value { return true } else { return false } }()
@@ -495,23 +550,23 @@ extension DataGridView: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = GridRowView()
         view.isAlternate = row % 2 == 1
+        view.showsCellSelection = !cellSelection.isEmpty
         return view
     }
 
-    func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
-        guard !isApplyingSortIndicator else { return }
-        guard let descriptor = tableView.sortDescriptors.first, let key = descriptor.key,
-              key.hasPrefix("c"), let column = Int(key.dropFirst()), content.columns.indices.contains(column)
-        else { return }
-        if isLocalSortEnabled {
-            applyLocalSort(column: column, ascending: descriptor.ascending)
-        } else {
-            delegate?.dataGrid(self, didChangeSort: [SortKey(column: content.columns[column].name, ascending: descriptor.ascending)])
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        // Rows chosen any other way (row numbers, ⌘A, find, a script) end the cell selection.
+        if !isSyncingRowSelection, !cellSelection.isEmpty {
+            setCellSelection(.empty, syncRows: false)
+            return
         }
+        guard !isSyncingRowSelection else { return }
+        delegate?.dataGridSelectionDidChange(self)
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        delegate?.dataGridSelectionDidChange(self)
+    func tableViewColumnDidMove(_ notification: Notification) {
+        displayOrderCache = nil
+        updateCellSelectionAppearance()
     }
 
     func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
@@ -561,10 +616,14 @@ extension DataGridView: NSTextFieldDelegate {
 
 extension DataGridView: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
+        populateContextMenu(menu, row: tableView.clickedRow, tableColumn: tableView.clickedColumn)
+    }
+
+    /// The cell menu for a click at `row` / `tableColumn` (-1 for none). Scripted checks call it directly.
+    func populateContextMenu(_ menu: NSMenu, row clicked: Int, tableColumn clickedColumn: Int) {
         menu.removeAllItems()
-        let clicked = tableView.clickedRow
         if clicked >= 0 {
-            contextCell = (clicked, tableView.clickedColumn)
+            contextCell = (clicked, clickedColumn)
             contextRows = tableView.selectedRowIndexes.contains(clicked) ? tableView.selectedRowIndexes : IndexSet(integer: clicked)
         } else {
             contextCell = nil
@@ -580,8 +639,15 @@ extension DataGridView: NSMenuDelegate {
         menu.addItem(item(isEditable ? "Edit Value…" : "View Value…", #selector(openValueEditor(_:))))
         menu.addItem(.separator())
         menu.addItem(item("Copy", #selector(copy(_:))))
+        if !cellSelection.isEmpty {
+            // Copy takes the cells; the rows they sit on stay one click away, as in TablePro.
+            menu.addItem(item(rows.count > 1 ? "Copy \(rows.count) Rows" : "Copy Row", #selector(copyRowsAsTSV(_:))))
+        }
         menu.addItem(item("Copy Cell Value", #selector(copyCell(_:))))
         menu.addItem(item("Copy with Header", #selector(copyWithHeader(_:))))
+        if isEditable {
+            menu.addItem(item("Paste", #selector(paste(_:))))
+        }
         let copyAs = NSMenuItem(title: "Copy As", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.addItem(item("CSV", #selector(copyAsCSV(_:))))
@@ -601,6 +667,7 @@ extension DataGridView: NSMenuDelegate {
             if allowsSQLExpressions {
                 menu.addItem(item("Set Current Timestamp", #selector(setCurrentTimestamp(_:))))
             }
+            menu.addItem(item(cellSelection.cellCount > 1 && contextCellIsSelected ? "Fill Selected Cells…" : "Fill Cell…", #selector(fillSelectedCells(_:))))
             menu.addItem(.separator())
             let allDeleted = rows.allSatisfy { content.changes.deletions.contains($0) }
             menu.addItem(item(allDeleted ? "Restore Row" : (rows.count > 1 ? "Delete \(rows.count) Rows" : "Delete Row"), #selector(deleteRows(_:))))
@@ -629,15 +696,33 @@ final class GridTableView: NSTableView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         lastClickedColumn = column(at: point)
+        if let grid = gridView, grid.handleCellMouseDown(event, at: point) { return }
         super.mouseDown(with: event)
+    }
+
+    /// A right-click outside the selection selects the clicked cell first, so the menu acts on what was clicked.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        gridView?.prepareContextSelection(at: convert(event.locationInWindow, from: nil))
+        return super.menu(for: event)
+    }
+
+    /// ⌘A selects every row, as in TablePro; the cell selection ends.
+    override func selectAll(_ sender: Any?) {
+        gridView?.clearCellSelection()
+        super.selectAll(sender)
     }
 
     override func keyDown(with event: NSEvent) {
         guard let grid = gridView else { return super.keyDown(with: event) }
+        if grid.handleCellKeyDown(event) { return }
         switch event.keyCode {
         case 36, 76: // Return, Enter; Option-Return opens the value editor
-            if selectedRow >= 0, event.modifierFlags.contains(.option) {
+            if event.modifierFlags.contains(.option), grid.targetCell != nil {
                 grid.openValueEditor(nil)
+                return
+            }
+            if let active = grid.cellSelection.active, let column = grid.tableColumnIndex(ofDisplayPosition: active.column) {
+                grid.beginEditing(row: active.row, tableColumn: column)
                 return
             }
             if selectedRow >= 0 {
@@ -667,6 +752,15 @@ final class GridTableView: NSTableView {
 
 final class GridRowView: NSTableRowView {
     var isAlternate = false
+    /// While cells are selected the rows they touch are selected too (for row commands), but only the cells are drawn
+    /// as selected and the text keeps its normal color.
+    var showsCellSelection = false {
+        didSet { if showsCellSelection != oldValue { needsDisplay = true } }
+    }
+
+    override var interiorBackgroundStyle: NSView.BackgroundStyle {
+        showsCellSelection ? .normal : super.interiorBackgroundStyle
+    }
 
     override func drawBackground(in dirtyRect: NSRect) {
         (isAlternate ? Theme.gridAlternateRow : Theme.gridBackground).setFill()
@@ -674,7 +768,7 @@ final class GridRowView: NSTableRowView {
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
-        guard selectionHighlightStyle != .none else { return }
+        guard selectionHighlightStyle != .none, !showsCellSelection else { return }
         let color: NSColor = isEmphasized ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor
         color.setFill()
         bounds.fill()

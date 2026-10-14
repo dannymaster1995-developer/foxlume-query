@@ -8,6 +8,7 @@ enum AppEnvironment {
     static let credentials: CredentialStore = CredentialStores.makeDefault()
     static let history = QueryHistoryStore()
     static let savedQueries = SavedQueryStore()
+    static let filterPresets = FilterPresetStore()
     static let openQuicklyFrecency = QuickOpenFrecencyStore()
     static var settings: AppSettings {
         get { SettingsStore.shared.settings }

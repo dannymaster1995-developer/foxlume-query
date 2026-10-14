@@ -34,6 +34,9 @@ they have had less testing and some features are missing.
 **Browsing and editing**
 - Sidebar of tables, views, collections or Redis keys, with a filter and a schema picker. Engine-internal databases are hidden by default.
 - Paged grids (5 to 1,000 rows per page, all rows, or a custom size) with server-side sorting and filters by column and operator or by raw WHERE / MongoDB filter / Redis pattern.
+- Multi-column sort: click a header to sort ascending, again for descending, a third time for no sort; Shift-click adds the column as the next key (numbered in the header). Table tabs sort on the server with one ORDER BY (a sort document on MongoDB); query results sort in memory. The header menu has Sort Ascending / Descending, Don't Sort, Select Column, Copy Column Name, Fill Column… and Filter with Column.
+- Filters with =, ≠, >, ≥, <, ≤, contains, starts / ends with, matches regex, between, not between, in / not in list, is empty / not empty and is (not) NULL. Text operators ignore case unless Match Case (Aa) is on; rules combine with Match All or Match Any. Save the filters of a table as a named preset and apply or delete it later. A cell's context menu offers Filter conditions built from its value.
+- Cell selection: click a cell, drag or Shift-click for a range, ⌘-click to add or remove cells, ⌘-click a header (or Select Column) for a whole column, Shift-arrows to extend. ⌘C copies the range as TSV (⌥⌘C with headers). ⌘V pastes TSV or CSV from the selected cell as staged edits (one undo step); a block as wide as the table is added as new rows. Fill Column… and Fill Selected Cells… set one value. The status bar shows count, sum, average, minimum and maximum of the selected cells.
 - In-place editing with undo and redo, including Set NULL, DEFAULT and Current Timestamp. Save runs every change in one transaction, checks that each change touched exactly one row, and rolls back otherwise. Preview SQL (⇧⌘P) shows exactly what Save will run.
 - Foreign key cells link to the referenced row; the Row Inspector (⌥⌘I) shows the selected row column by column with types.
 - Find in results (⌘F) highlights matches in the loaded rows; Search All Rows searches the whole table on the server.
@@ -113,7 +116,7 @@ port on 127.0.0.1 and skip otherwise. The credentials they use are local test va
 
 | Data | Location |
 |---|---|
-| Connections, settings, history, saved queries, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
+| Connections, settings, history, saved queries, filter presets, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
 | Database and SSH passwords | macOS Keychain, service `com.foxlume.query.connection` |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder
@@ -150,6 +153,10 @@ Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords inc
 | ⌘0 | Toggle sidebar |
 | ⌘/ | Toggle comment |
 | ⌥⌘C / ⌥⌘J | Copy with headers / copy as JSON |
+| ⌘V | Paste cells or rows into the grid |
+| Shift-click a header | Add a column to the sort |
+| ⇧ arrows / ⇧⌘ arrows | Extend the cell selection by one cell / to the edge |
+| ⇧Space / Esc | Widen the cell selection to whole rows / end it |
 | ⇧⌘E / ⌥⇧⌘E | Export results / export tables |
 | ⇧⌘I | Import CSV into a table |
 
@@ -165,7 +172,8 @@ Sources/
       Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/
     SQL/                dialects, statement splitting, query languages, table queries, change generation, formatter
     Completion/         query editor completion engines
-    Storage/            connections, Keychain, history, saved queries, settings
+    Storage/            connections, Keychain, history, saved queries, filter presets, settings
+    Grid/               sort cycle and in-memory sort, paste parsing and placement, selection figures, cell filters
     Search/             Open Quickly matching, ranking and recency
     Explain/            query plan model, parsers per engine, analysis and the Explain runner
     Theme/              built-in themes, VS Code theme import
@@ -174,7 +182,7 @@ Sources/
   FoxlumeQuery/         the AppKit app
   fqprobe/              driver probe CLI
 Tests/FoxlumeQueryCoreTests/   Swift Testing suites for the core library
-Tests/FoxlumeQueryAppTests/    editor, filter bar, workspace, saved query and Open Quickly checks against the real AppKit classes
+Tests/FoxlumeQueryAppTests/    editor, filter bar, workspace, saved query, Open Quickly and grid selection / paste checks against the real AppKit classes
 scripts/                build, environment, test servers, sample data
 ```
 

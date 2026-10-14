@@ -45,6 +45,23 @@ final class GridCellView: NSTableCellView {
         case current
     }
 
+    /// Cell selection: selected cells are tinted, the active one also gets an outline; row numbers of rows that hold
+    /// selected cells get a lighter tint.
+    enum SelectionMark {
+        case none
+        case selected
+        case active
+        case row
+    }
+
+    private var selectionMark: SelectionMark = .none
+
+    func setSelectionMark(_ mark: SelectionMark) {
+        guard mark != selectionMark else { return }
+        selectionMark = mark
+        refreshColors()
+    }
+
     func setFindHighlight(_ highlight: FindHighlight) {
         guard highlight != findHighlight else { return }
         findHighlight = highlight
@@ -103,6 +120,11 @@ final class GridCellView: NSTableCellView {
         (visible ? fieldToButton : fieldToEdge)?.isActive = true
     }
 
+    /// Whether a point (in this view) is on the visible foreign key arrow, which handles its own clicks.
+    func isReferenceButtonHit(at point: NSPoint) -> Bool {
+        !referenceButton.isHidden && referenceButton.frame.insetBy(dx: -2, dy: -2).contains(point)
+    }
+
     @objc private func followReference(_ sender: Any?) {
         onFollowReference?()
     }
@@ -142,6 +164,17 @@ final class GridCellView: NSTableCellView {
         case .modified: layer?.backgroundColor = selected ? nil : Theme.modifiedCell.cgColor
         case .inserted: layer?.backgroundColor = selected ? nil : Theme.insertedRow.cgColor
         case .deleted: layer?.backgroundColor = selected ? nil : Theme.deletedRow.cgColor
+        }
+        switch selectionMark {
+        case .none:
+            layer?.borderWidth = 0
+        case .selected, .active:
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(state == .normal ? 0.24 : 0.36).cgColor
+            layer?.borderWidth = selectionMark == .active ? 1.5 : 0
+            layer?.borderColor = NSColor.controlAccentColor.cgColor
+        case .row:
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+            layer?.borderWidth = 0
         }
         switch findHighlight {
         case .none: break

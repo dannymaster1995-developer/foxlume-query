@@ -17,7 +17,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
 
     private var mode: Mode
     private var query: TableQuery
-    private var structure: TableStructure?
+    private(set) var structure: TableStructure?
     private var totalRows: Int?
     private var loadGeneration = 0
     private var isLoading = false {
@@ -29,7 +29,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     /// The database this tab's rows came from; MySQL table refs carry no database name.
     private let openedDatabase: String?
 
-    private let grid = DataGridView()
+    let grid = DataGridView()
     private let inspector = RowInspectorView()
     /// Grid and, when shown, the row inspector beside it.
     private lazy var dataStack: NSStackView = {
@@ -50,7 +50,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     private var inspectorDivider: NSView? { dataStack.arrangedSubviews[safe: 1] }
     /// Per-tab history of grid edits, separate from the window's text undo.
     private let editUndoManager = UndoManager()
-    private let filterBar = FilterBarView()
+    let filterBar = FilterBarView()
     private var filterBarHeight: NSLayoutConstraint?
     private lazy var structureController = StructureViewController(workspace: workspace, table: table)
     private let contentContainer = NSView()
@@ -123,18 +123,30 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     /// Editing is paused while rows are loading or being saved, so no edit lands on rows about to be replaced.
     private func updateEditability() {
         grid.isEditable = canEdit && !isLoading && !isSaving
+        grid.readOnlyReason = readOnlyReason
         updateControls()
+    }
+
+    /// Why the rows cannot be changed right now, for the paste and fill alerts.
+    private var readOnlyReason: String? {
+        if workspace.isReadOnly { return "This connection is read-only." }
+        if isView { return "“\(table.name)” is a view; its rows cannot be edited here." }
+        if isStale { return "The connection switched to another database. Reopen “\(table.name)” from the sidebar to edit it." }
+        if isLoading || isSaving { return "The rows are being loaded or saved. Try again in a moment." }
+        return nil
     }
 
     override func loadView() {
         let root = NSView()
         grid.delegate = self
         grid.allowsColumnSort = workspace.capabilities.supportsColumnSort
+        if case .columns = workspace.capabilities.browseFilterStyle { grid.allowsColumnFilter = true }
         grid.immutableColumns = workspace.capabilities.immutableColumns
         grid.allowsSQLExpressions = workspace.kind.isSQL
         grid.allowsServerSearch = workspace.kind.isSQL
         grid.allowsDefaultKeyword = workspace.kind.isSQL && workspace.kind != .sqlite
         grid.isEditable = canEdit
+        grid.readOnlyReason = readOnlyReason
         grid.tableNameForCopy = table.name
         grid.dialectForCopy = workspace.dialect
         grid.showsRowNumbers = AppEnvironment.settings.showRowNumbers
@@ -142,7 +154,8 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
 
         filterBar.translatesAutoresizingMaskIntoConstraints = false
         filterBar.isHidden = true
-        filterBar.onApply = { [weak self] rules, raw in self?.applyFilters(rules, raw: raw) }
+        filterBar.onApply = { [weak self] rules, raw, logic in self?.applyFilters(rules, raw: raw, logic: logic) }
+        filterBar.presets = (AppEnvironment.filterPresets, FilterPresetScope(connectionID: workspace.config.id, database: openedDatabase, schema: table.schema, table: table.name))
         filterBar.rawCompletion = workspace.rawFilterCompletion(for: table)
 
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -566,14 +579,27 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         filterBar.isHidden = !show
         filterBarHeight?.isActive = !show
         if show {
-            filterBar.configure(columns: grid.content.columns.map(\.name), rules: query.filters, rawWhere: query.rawWhere, capabilities: workspace.capabilities)
+            filterBar.configure(columns: grid.content.columns.map(\.name), rules: query.filters, logic: query.filterLogic, rawWhere: query.rawWhere, capabilities: workspace.capabilities)
             filterBar.addRuleIfEmpty()
         }
     }
 
-    func applyFilters(_ rules: [FilterRule], raw: String) {
+    /// Opens the filter bar with a new rule for `column` (header menu "Filter with Column").
+    func showFilters(adding rule: FilterRule) {
+        if filterBar.isHidden {
+            setMode(.data)
+            filterBar.isHidden = false
+            filterBarHeight?.isActive = false
+            filterBar.configure(columns: grid.content.columns.map(\.name), rules: query.filters, logic: query.filterLogic, rawWhere: query.rawWhere, capabilities: workspace.capabilities)
+        }
+        filterBar.addFilterRule(rule)
+    }
+
+    /// `logic` nil keeps how the current rules combine (adding a rule from a cell menu).
+    func applyFilters(_ rules: [FilterRule], raw: String, logic: FilterLogic? = nil) {
         guard confirmLeavingPage() else { return }
         query.filters = rules
+        if let logic { query.filterLogic = logic }
         query.rawWhere = raw
         query.page = 0
         totalRows = nil
@@ -669,7 +695,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     }
 
     /// Applies new pending edits and records how to return to the current ones.
-    private func commit(_ changes: PendingChanges, action: String) {
+    func commit(_ changes: PendingChanges, action: String) {
         let previous = grid.content.changes
         editUndoManager.registerUndo(withTarget: self) { target in
             target.commit(previous, action: action)
@@ -876,7 +902,9 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         let loaded = grid.content.rows.count
         var parts: [String] = []
         let selected = grid.selectedRows.count
-        if selected > 0 {
+        if let statistics = grid.selectionStatistics {
+            parts.append(statistics.summary)
+        } else if selected > 0 {
             parts.append("\(selected) of \(loaded.groupedText) \(rowNouns) selected")
         } else if loaded == 0 {
             parts.append(isLoading ? "Loading…" : "No \(rowNouns)")
@@ -964,11 +992,9 @@ extension TableTabViewController: DataGridViewDelegate {
             item.representedObject = [cell.row, column]
             items.append(item)
         }
-        if cell.row < grid.content.rows.count, case .columns = workspace.capabilities.browseFilterStyle {
-            let item = NSMenuItem(title: "Filter by This Value", action: #selector(filterBySelection(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = [cell.row, column]
-            items.append(item)
+        if cell.row < grid.content.rows.count, case .columns = workspace.capabilities.browseFilterStyle,
+           let filter = filterMenuItem(row: cell.row, column: column) {
+            items.append(filter)
         }
         return items
     }
@@ -981,14 +1007,12 @@ extension TableTabViewController: DataGridViewDelegate {
         }
     }
 
-    @objc private func filterBySelection(_ sender: NSMenuItem) {
-        guard let position = sender.representedObject as? [Int], position.count == 2 else { return }
-        let row = position[0]
-        let column = position[1]
-        guard let name = grid.content.columns[safe: column]?.name, let value = grid.content.rows[safe: row]?[safe: column] else { return }
-        let rule = value.isNull ? FilterRule(column: name, op: .isNull) : FilterRule(column: name, op: .equals, value: value.displayString)
+    /// Adds a rule from the cell menu's Filter submenu to the filters in place.
+    func addFilter(_ rule: FilterRule) {
         applyFilters(query.filters + [rule], raw: query.rawWhere)
     }
+
+    var currentQuery: TableQuery { query }
 }
 
 extension TableTabViewController: NSMenuItemValidation {

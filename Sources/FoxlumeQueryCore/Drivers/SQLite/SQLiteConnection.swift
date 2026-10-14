@@ -30,6 +30,7 @@ public final class SQLiteConnection: DatabaseConnection {
         }
         sqlite3_busy_timeout(db, 5000)
         sqlite3_extended_result_codes(db, 1)
+        SQLiteRegexp.register(on: db)
         handleLock.lock()
         handle = db
         handleLock.unlock()

@@ -11,14 +11,22 @@ final class FilterBarView: NSView {
         var refilter: @MainActor (_ result: CompletionResult, _ token: String) -> [CompletionItem]
     }
 
-    var onApply: (([FilterRule], String) -> Void)?
+    var onApply: (([FilterRule], String, FilterLogic) -> Void)?
+    /// Where presets for this table are kept; nil hides the Presets menu.
+    var presets: (store: FilterPresetStore, scope: FilterPresetScope)? {
+        didSet { presetButton.isHidden = presets == nil || !(addButton?.isHidden == false) }
+    }
     /// Set by the table tab for SQL engines; nil leaves the Raw SQL box without suggestions (spec 10).
     var rawCompletion: RawCompletion? {
         didSet { if rawCompletion == nil { closeRawSuggestions() } }
     }
 
     private var columns: [String] = []
-    private var rules: [FilterRule] = []
+    private(set) var rules: [FilterRule] = []
+    private(set) var logic: FilterLogic = .and
+    /// "Match all" / "Match any", shown with two or more rules as in TablePro.
+    private let logicPopup = NSPopUpButton()
+    let presetButton = NSPopUpButton(frame: .zero, pullsDown: true)
     private let rowsStack = NSStackView()
     private let rawField = NSTextField()
     private let rawLabel = UI.label("WHERE", size: 11, weight: .semibold, color: .secondaryLabelColor)
@@ -60,7 +68,24 @@ final class FilterBarView: NSView {
         apply.keyEquivalent = ""
         apply.setAccessibilityIdentifier("applyFilters")
         let clear = UI.button("Clear", target: self, action: #selector(clear(_:)))
-        let footer = UI.hstack([add, rawLabel, rawField, typePopup, apply, clear], spacing: 6)
+        logicPopup.controlSize = .small
+        logicPopup.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        logicPopup.addItems(withTitles: ["Match All", "Match Any"])
+        logicPopup.target = self
+        logicPopup.action = #selector(logicChanged(_:))
+        logicPopup.toolTip = "Rows must match all filters, or any one of them"
+        logicPopup.setAccessibilityIdentifier("filterLogic")
+        logicPopup.isHidden = true
+        presetButton.controlSize = .small
+        presetButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        presetButton.isHidden = true
+        presetButton.setAccessibilityIdentifier("filterPresets")
+        presetButton.menu = NSMenu()
+        // A pull-down button shows its first item as the title; the rest is built when the menu opens.
+        presetButton.menu?.addItem(NSMenuItem(title: "Presets", action: nil, keyEquivalent: ""))
+        presetButton.menu?.delegate = self
+        presetButton.toolTip = "Saved filters for this table"
+        let footer = UI.hstack([add, logicPopup, rawLabel, rawField, typePopup, apply, clear, presetButton], spacing: 6)
 
         let stack = NSStackView(views: [rowsStack, footer])
         stack.orientation = .vertical
@@ -88,8 +113,10 @@ final class FilterBarView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(columns: [String], rules: [FilterRule], rawWhere: String, capabilities: EngineCapabilities) {
+    func configure(columns: [String], rules: [FilterRule], logic: FilterLogic = .and, rawWhere: String, capabilities: EngineCapabilities) {
         self.columns = columns
+        self.logic = logic
+        logicPopup.selectItem(at: logic == .or ? 1 : 0)
         style = capabilities.browseFilterStyle
         rawLabel.stringValue = capabilities.rawFilterLabel.uppercased()
         rawField.placeholderString = capabilities.rawFilterPlaceholder
@@ -98,6 +125,7 @@ final class FilterBarView: NSView {
             // Key browsing: one glob plus a type, no column rules.
             self.rules = []
             addButton?.isHidden = true
+            presetButton.isHidden = true
             typePopup.isHidden = false
             typePopup.removeAllItems()
             typePopup.addItem(withTitle: "All Types")
@@ -113,6 +141,7 @@ final class FilterBarView: NSView {
         } else {
             self.rules = rules
             addButton?.isHidden = false
+            presetButton.isHidden = presets == nil
             typePopup.isHidden = true
         }
         rebuild()
@@ -151,6 +180,7 @@ final class FilterBarView: NSView {
     }
 
     private func rebuild() {
+        logicPopup.isHidden = rules.count < 2
         rowsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (index, rule) in rules.enumerated() {
             let row = FilterRuleRow(rule: rule, columns: columns)
@@ -170,18 +200,44 @@ final class FilterBarView: NSView {
 
     @objc private func addRule(_ sender: Any?) {
         guard let first = columns.first else { return }
-        rules.append(FilterRule(column: first, op: .equals))
+        addFilterRule(FilterRule(column: first, op: .equals))
+    }
+
+    /// Adds a rule and puts the caret in its value ("Filter with Column" in the header menu).
+    func addFilterRule(_ rule: FilterRule) {
+        rules.append(rule)
         rebuild()
         focusFirstValue()
+    }
+
+    @objc private func logicChanged(_ sender: Any?) {
+        logic = logicPopup.indexOfSelectedItem == 1 ? .or : .and
+    }
+
+    var presetColumns: [String] { columns }
+    var rawWhereText: String { rawField.stringValue }
+
+    /// Replaces what the bar shows without applying it.
+    func load(rules: [FilterRule], rawWhere: String, logic: FilterLogic) {
+        self.rules = rules
+        self.logic = logic
+        logicPopup.selectItem(at: logic == .or ? 1 : 0)
+        rawField.stringValue = rawWhere
+        rebuild()
+    }
+
+    /// Apply, as the button does.
+    func applyNow() {
+        apply(nil)
     }
 
     @objc private func apply(_ sender: Any?) {
         closeRawSuggestions()
         window?.makeFirstResponder(nil)
         if case .keyPattern = style {
-            onApply?(typeRules, rawField.stringValue)
+            onApply?(typeRules, rawField.stringValue, .and)
         } else {
-            onApply?(rules, rawField.stringValue)
+            onApply?(rules, rawField.stringValue, logic)
         }
     }
 
@@ -191,7 +247,7 @@ final class FilterBarView: NSView {
         rawField.stringValue = ""
         typePopup.selectItem(at: 0)
         rebuild()
-        onApply?([], "")
+        onApply?([], "", logic)
     }
 }
 
@@ -514,11 +570,16 @@ private final class FilterRuleRow: NSView {
     var onRemove: (() -> Void)?
     var onSubmit: (() -> Void)?
     let valueField = NSTextField()
+    /// Upper bound of BETWEEN / NOT BETWEEN.
+    let secondField = NSTextField()
 
     private var rule: FilterRule
     private let enabled = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let columnPopup = NSPopUpButton()
     private let operatorPopup = NSPopUpButton()
+    private let andLabel = UI.label("and", size: 11, color: .secondaryLabelColor)
+    /// "Aa": compare text case-sensitively. Off by default, so text filters ignore case as before.
+    private let matchCase = NSButton(title: "Aa", target: nil, action: nil)
 
     init(rule: FilterRule, columns: [String]) {
         self.rule = rule
@@ -532,39 +593,67 @@ private final class FilterRuleRow: NSView {
         columnPopup.controlSize = .small
         columnPopup.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         columnPopup.addItems(withTitles: columns)
+        if !columns.contains(rule.column) {
+            // A preset can name a column this table no longer has; keep it visible rather than silently switching.
+            columnPopup.addItem(withTitle: rule.column)
+        }
         columnPopup.selectItem(withTitle: rule.column)
         columnPopup.target = self
         columnPopup.action = #selector(changed(_:))
 
         operatorPopup.controlSize = .small
         operatorPopup.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        for op in FilterOperator.allCases {
+        for op in FilterOperator.menuOrder {
             operatorPopup.addItem(withTitle: op.title)
             operatorPopup.lastItem?.representedObject = op.rawValue
         }
-        operatorPopup.selectItem(at: FilterOperator.allCases.firstIndex(of: rule.op) ?? 0)
+        operatorPopup.selectItem(at: FilterOperator.menuOrder.firstIndex(of: rule.op) ?? 0)
         operatorPopup.target = self
         operatorPopup.action = #selector(changed(_:))
+        operatorPopup.setAccessibilityIdentifier("filterOperator")
 
-        valueField.stringValue = rule.value
-        valueField.placeholderString = "Value"
-        valueField.controlSize = .small
-        valueField.font = Theme.monospaced(11)
-        valueField.target = self
-        valueField.action = #selector(submitted(_:))
-        valueField.delegate = self
-        valueField.isEnabled = rule.op.needsValue
-        valueField.setAccessibilityIdentifier("filterValue")
+        for (field, text, placeholder, identifier) in [(valueField, rule.value, "Value", "filterValue"), (secondField, rule.secondValue, "Upper bound", "filterSecondValue")] {
+            field.stringValue = text
+            field.placeholderString = placeholder
+            field.controlSize = .small
+            field.font = Theme.monospaced(11)
+            field.target = self
+            field.action = #selector(submitted(_:))
+            field.delegate = self
+            field.setAccessibilityIdentifier(identifier)
+        }
+
+        matchCase.setButtonType(.pushOnPushOff)
+        matchCase.bezelStyle = .texturedRounded
+        matchCase.controlSize = .small
+        matchCase.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        matchCase.state = rule.matchCase ? .on : .off
+        matchCase.toolTip = "Match Case"
+        matchCase.target = self
+        matchCase.action = #selector(changed(_:))
+        matchCase.setAccessibilityIdentifier("filterMatchCase")
+        matchCase.setAccessibilityLabel("Match Case")
 
         let remove = UI.iconButton("minus.circle", tooltip: "Remove Filter", target: self, action: #selector(removeClicked(_:)))
-        let stack = UI.hstack([enabled, columnPopup, operatorPopup, valueField, remove], spacing: 6)
+        let stack = UI.hstack([enabled, columnPopup, operatorPopup, valueField, andLabel, secondField, matchCase, remove], spacing: 6)
+        stack.detachesHiddenViews = true
         addSubviewFilling(stack)
         columnPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         valueField.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        secondField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        updateVisibility()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    private func updateVisibility() {
+        valueField.isEnabled = rule.op.needsValue
+        valueField.placeholderString = rule.op == .regex ? "Regular expression" : (rule.op == .inList || rule.op == .notInList ? "a, b, c" : (rule.op.needsSecondValue ? "Lower bound" : "Value"))
+        andLabel.isHidden = !rule.op.needsSecondValue
+        secondField.isHidden = !rule.op.needsSecondValue
+        matchCase.isHidden = !rule.op.supportsMatchCase
     }
 
     @objc private func changed(_ sender: Any?) {
@@ -574,7 +663,9 @@ private final class FilterRuleRow: NSView {
             rule.op = op
         }
         rule.value = valueField.stringValue
-        valueField.isEnabled = rule.op.needsValue
+        rule.secondValue = secondField.stringValue
+        rule.matchCase = matchCase.state == .on
+        updateVisibility()
         onChange?(rule)
     }
 
