@@ -16,6 +16,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
     let workspace: ConnectionWorkspace
     let tabs: TabsViewController
     private let sidebar: SidebarViewController
+    /// The Tables | Saved Queries switch around `sidebar` and `savedQueriesList`.
+    let sidebarContainer: SidebarContainerViewController
+    let savedQueriesList: SavedQueriesViewController
     private let history: HistoryViewController
     private let split = NSSplitViewController()
     private var historyItem: NSSplitViewItem?
@@ -28,6 +31,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         self.workspace = workspace
         self.tabs = TabsViewController(workspace: workspace)
         self.sidebar = SidebarViewController(workspace: workspace)
+        self.savedQueriesList = SavedQueriesViewController(workspace: workspace)
+        self.sidebarContainer = SidebarContainerViewController(tables: sidebar, savedQueries: savedQueriesList)
         self.history = HistoryViewController(workspace: workspace)
 
         let window = NSWindow(
@@ -47,7 +52,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
 
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarContainer)
         sidebarItem.minimumThickness = 200
         sidebarItem.maximumThickness = 420
         sidebarItem.canCollapse = true
@@ -84,14 +89,19 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         }
         history.onOpen = { [weak self] sql, run in
             guard let self else { return }
-            if !run, let query = self.tabs.selectedTab?.content as? QueryTabViewController, query.sql.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                query.setSQL(sql)
+            if run {
+                self.tabs.openQuery(sql: sql, run: true)
             } else {
-                self.tabs.openQuery(sql: sql, run: run)
+                self.openSQL(sql, title: nil, newTab: false)
             }
         }
+        history.onSaveQuery = { [weak self] sql in self?.presentSaveQuery(sql: sql) }
+        connectSavedQueries()
         tabs.onSelectionChange = { [weak self] tab in
-            if let table = tab?.table { self?.sidebar.select(table) }
+            guard let self, let table = tab?.table else { return }
+            self.sidebar.select(table)
+            // Opening a table counts for Open Quickly's ranking, wherever it was opened from.
+            AppEnvironment.openQuicklyFrecency.record(QuickOpenItem.tableKey(table), connection: self.workspace.config.id)
         }
 
         statusView.onReconnect = { [weak self] in self?.reconnect(nil) }
@@ -142,6 +152,13 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func databaseChosen(_ sender: Any?) {
         guard let name = databasePopup.titleOfSelectedItem, name != workspace.currentDatabase else { return }
+        requestDatabaseSwitch(to: name)
+    }
+
+    /// Switches database unless table edits or staged truncates and drops would be lost; table tabs close.
+    /// Used by the toolbar's database menu and by Open Quickly.
+    func requestDatabaseSwitch(to name: String) {
+        guard name != workspace.currentDatabase else { return }
         guard !tabs.hasUnsavedTableEdits, workspace.pendingTableOperations.isEmpty else {
             workspaceChanged()
             Alerts.showError(DatabaseError.unsupported("Save or discard the edits in your open tables and the pending truncates and drops before switching database."), title: "Unsaved changes", in: window)
@@ -401,12 +418,15 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         Task { await workspace.refreshMetadata() }
     }
 
+    /// View › Focus Sidebar Filter (⌃⌥⌘F): the filter of the list the sidebar shows.
     @objc func focusTableFilter(_ sender: Any?) {
         if let sidebarItem = split.splitViewItems.first, sidebarItem.isCollapsed {
             sidebarItem.isCollapsed = false
         }
-        sidebar.focusFilter()
+        sidebarContainer.focusFilter()
     }
+
+    var splitItems: [NSSplitViewItem] { split.splitViewItems }
 
     func sidebarMenuTitles(for info: TableInfo) -> [String] {
         sidebar.select(info.ref)
@@ -472,6 +492,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
 extension WorkspaceWindowController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if let transfer = validateTransferItem(menuItem.action) { return transfer }
+        if let saved = validateSavedQueriesItem(menuItem.action) { return saved }
         let hasOperations = !workspace.pendingTableOperations.isEmpty
         switch menuItem.action {
         case #selector(saveAll(_:)):

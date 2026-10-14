@@ -45,6 +45,9 @@ import AppKit
     @objc optional func showDatabaseSwitcher(_ sender: Any?)
     @objc optional func toggleComment(_ sender: Any?)
     @objc optional func focusTableFilter(_ sender: Any?)
+    @objc optional func openQuickly(_ sender: Any?)
+    @objc optional func addToSavedQueries(_ sender: Any?)
+    @objc optional func showSavedQueries(_ sender: Any?)
     @objc optional func selectNextTab(_ sender: Any?)
     @objc optional func selectPreviousTab(_ sender: Any?)
     @objc optional func selectTabByNumber(_ sender: Any?)
@@ -83,6 +86,7 @@ enum MainMenu {
             item("New Query Tab", #selector(FoxlumeQueryActions.newQueryTab(_:)), "t"),
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
             item("Open Connection URL…", #selector(FoxlumeQueryActions.promptConnectionURL(_:)), "k", [.command, .shift]),
+            item("Open Quickly…", #selector(FoxlumeQueryActions.openQuickly(_:)), "o", [.command, .shift]),
             item("Save Query As…", #selector(FoxlumeQueryActions.saveQueryAs(_:)), "s", [.command, .shift]),
             item("Connections…", #selector(FoxlumeQueryActions.showWelcome(_:)), "0", [.command, .shift]),
             .separator(),
@@ -116,6 +120,7 @@ enum MainMenu {
             item("Run Without Limit", #selector(FoxlumeQueryActions.runWithoutLimit(_:)), "\r", [.command, .option]),
             item("Cancel Query", #selector(FoxlumeQueryActions.cancelQuery(_:)), "."),
             item("Format Query", #selector(FoxlumeQueryActions.formatQuery(_:)), "l", [.command, .shift]),
+            item("Add to Saved Queries…", #selector(FoxlumeQueryActions.addToSavedQueries(_:)), "d"),
             .separator(),
             item("Save", #selector(FoxlumeQueryActions.saveAll(_:)), "s"),
             item("Discard Changes", #selector(FoxlumeQueryActions.discardAll(_:))),
@@ -153,7 +158,8 @@ enum MainMenu {
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "0"),
             item("Query History", #selector(FoxlumeQueryActions.toggleHistory(_:)), "y"),
             item("Row Inspector", #selector(FoxlumeQueryActions.toggleInspector(_:)), "i", [.command, .option]),
-            item("Open Quickly…", #selector(FoxlumeQueryActions.focusTableFilter(_:)), "o", [.command, .shift]),
+            item("Saved Queries", #selector(FoxlumeQueryActions.showSavedQueries(_:))),
+            item("Focus Sidebar Filter", #selector(FoxlumeQueryActions.focusTableFilter(_:)), "f", [.command, .option, .control]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ]))

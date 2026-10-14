@@ -28,6 +28,8 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     private lazy var stopButton = UI.button("Stop", symbol: "stop.fill", target: self, action: #selector(cancelQuery(_:)))
     private lazy var exportButton = UI.button("Export", symbol: "square.and.arrow.up", target: self, action: #selector(exportResults(_:)))
     private lazy var formatButton = UI.button("Format", symbol: "text.alignleft", target: self, action: #selector(formatQuery(_:)))
+    /// Goes up the responder chain to the window, which owns the saved queries.
+    private lazy var saveQueryButton = UI.iconButton("star", tooltip: "Add to Saved Queries (⌘D)", target: nil, action: #selector(FoxlumeQueryActions.addToSavedQueries(_:)))
 
     private var results: [StatementResult] = []
     private var runError: Error?
@@ -69,7 +71,8 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         let limitLabel = UI.label("\(workspace.queryLanguage.displayName) · limit \(AppEnvironment.settings.queryRowLimit.groupedText) rows", size: 11, color: .tertiaryLabelColor)
         formatButton.toolTip = "Format the selection or the whole query (⇧⌘L)"
         formatButton.isHidden = !workspace.kind.isSQL
-        let toolbar = UI.hstack([runButton, runAllButton, stopButton, UI.separator(vertical: true), formatButton, UI.flexibleSpace(), limitLabel], spacing: 6)
+        saveQueryButton.setAccessibilityIdentifier("addToSavedQueries")
+        let toolbar = UI.hstack([runButton, runAllButton, stopButton, UI.separator(vertical: true), formatButton, saveQueryButton, UI.flexibleSpace(), limitLabel], spacing: 6)
         let toolbarContainer = NSView()
         toolbarContainer.translatesAutoresizingMaskIntoConstraints = false
         toolbarContainer.addSubviewFilling(toolbar, insets: NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10))
@@ -232,6 +235,32 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     func setSQL(_ text: String) {
         editor.string = text
         focusEditor()
+    }
+
+    /// Adds `text` after the current text, a blank line apart, as one undoable change.
+    func appendSQL(_ text: String) {
+        let textView = editor.textView
+        let current = textView.string as NSString
+        var content = current.length
+        while content > 0, let scalar = UnicodeScalar(current.character(at: content - 1)), CharacterSet.whitespacesAndNewlines.contains(scalar) {
+            content -= 1
+        }
+        let tail = NSRange(location: content, length: current.length - content)
+        let replacement = (content == 0 ? "" : "\n\n") + text
+        guard textView.shouldChangeText(in: tail, replacementString: replacement) else { return }
+        textView.replaceCharacters(in: tail, with: replacement)
+        textView.didChangeText()
+        textView.undoManager?.setActionName("Insert Saved Query")
+        let end = NSRange(location: (textView.string as NSString).length, length: 0)
+        textView.setSelectedRange(end)
+        textView.scrollRangeToVisible(end)
+        focusEditor()
+    }
+
+    /// What "Add to Saved Queries…" saves: the selection, or the whole text when nothing is selected.
+    var textForSaving: String {
+        let selection = editor.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return selection.isEmpty ? editor.string.trimmingCharacters(in: .whitespacesAndNewlines) : selection
     }
 
     // MARK: Running

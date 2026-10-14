@@ -229,8 +229,8 @@ extension ConnectionWorkspace: CompletionSchemaProvider {
         return names
     }
 
-    /// Foxlume Query has no favorites store yet.
+    /// Saved queries with a keyword, for every connection plus this one (spec 7).
     func favorites() -> [CompletionFavorite] {
-        []
+        AppEnvironment.savedQueries.completionFavorites(for: config.id)
     }
 }

@@ -54,13 +54,15 @@ they have had less testing and some features are missing.
 - Run the statement under the caret (⌘↩), everything (⇧⌘↩) or without the row limit (⌥⌘↩); cancel with ⌘.; format SQL with ⇧⌘L. The row limit is applied by the server on PostgreSQL and MySQL, so large results never cross the network in full.
 - Confirmation before UPDATE or DELETE without WHERE, and before writes on Production connections (both can be turned off in Settings).
 - Open and save `.sql` files.
+- Saved queries (⌘D, or the star in a query tab): a "Saved Queries" side of the sidebar with nested folders, kept for one connection or shared with all of them. Each can have a keyword: typing it in the editor offers the query, and `;;` in its SQL marks where the cursor lands. Saved queries never run on their own; Run goes through the normal run path, Safe Mode included.
 
 **Everything else**
 - System, Light or Dark appearance; 13 built-in editor themes (Dracula, One Dark, Nord, Solarized, Catppuccin …) and import of VS Code themes (`.json` or `.vsix`).
-- Searchable query history (SQLite full-text search).
+- Searchable query history (SQLite full-text search); any entry can be kept as a saved query.
+- Open Quickly (⇧⌘O): one fuzzy search over tables and views (all schemas), databases, schemas, saved queries and recent history, with the tables, saved queries and history of the other open connections. Results rank by match and by how often and recently you opened them.
 - Open tabs come back when you reopen a connection; ⇧⌘T reopens a closed tab.
 
-**Not there yet:** SQL Server and many other engines, saved queries, Explain plans, ER diagrams, JSON and XLSX import. TLS connections are limited to TLS 1.2 for now.
+**Not there yet:** SQL Server and many other engines, Explain plans, ER diagrams, JSON and XLSX import. TLS connections are limited to TLS 1.2 for now.
 
 ## Building from source
 
@@ -105,7 +107,7 @@ port on 127.0.0.1 and skip otherwise. The credentials they use are local test va
 
 | Data | Location |
 |---|---|
-| Connections, settings, history, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
+| Connections, settings, history, saved queries, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
 | Database and SSH passwords | macOS Keychain, service `com.foxlume.query.connection` |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder
@@ -135,7 +137,9 @@ Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords inc
 | ⌘K | Switch database |
 | ⌥⌘1 / ⌥⌘2 | Data / Structure |
 | ⌘Y | Query history |
-| ⇧⌘O | Filter the table list |
+| ⇧⌘O | Open Quickly (⌘1 … ⌘5 pick its scope, ⌘↩ opens in a new tab) |
+| ⌘D | Add the query (or the selection) to Saved Queries |
+| ⌃⌥⌘F | Focus the sidebar filter |
 | ⌘0 | Toggle sidebar |
 | ⌘/ | Toggle comment |
 | ⌥⌘C / ⌥⌘J | Copy with headers / copy as JSON |
@@ -154,14 +158,15 @@ Sources/
       Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/
     SQL/                dialects, statement splitting, query languages, table queries, change generation, formatter
     Completion/         query editor completion engines
-    Storage/            connections, Keychain, history, settings
+    Storage/            connections, Keychain, history, saved queries, settings
+    Search/             Open Quickly matching, ranking and recency
     Theme/              built-in themes, VS Code theme import
     Export/             result export, table export and SQL dumps
     Import/             CSV import, SQL file runner, text decoding
   FoxlumeQuery/         the AppKit app
   fqprobe/              driver probe CLI
 Tests/FoxlumeQueryCoreTests/   Swift Testing suites for the core library
-Tests/FoxlumeQueryAppTests/    editor, filter bar and workspace checks against the real AppKit classes
+Tests/FoxlumeQueryAppTests/    editor, filter bar, workspace, saved query and Open Quickly checks against the real AppKit classes
 scripts/                build, environment, test servers, sample data
 ```
 

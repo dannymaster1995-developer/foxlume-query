@@ -18,7 +18,7 @@ public enum KeywordCase: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// A saved query offered when its keyword is typed (spec 7). Foxlume Query has no favorites store yet; providers return [].
+/// A saved query offered when its keyword is typed (spec 7); the app takes them from `SavedQueryStore`.
 public struct CompletionFavorite: Sendable, Hashable {
     public var keyword: String
     public var name: String

@@ -59,6 +59,9 @@ final class WelcomeModel: ObservableObject {
         try? AppEnvironment.connections.delete(id: config.id)
         AppEnvironment.credentials.deletePassword(for: config.id)
         AppEnvironment.credentials.deleteSSHSecret(for: config.id)
+        // Queries saved for this connection only go with it, as in TablePro; shared ones stay.
+        try? AppEnvironment.savedQueries.removeConnection(config.id)
+        AppEnvironment.openQuicklyFrecency.removeConnection(config.id)
     }
 
     func connection(_ id: UUID?) -> ConnectionConfig? {

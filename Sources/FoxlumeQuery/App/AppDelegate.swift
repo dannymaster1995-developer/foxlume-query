@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didFinishLaunching = true
         moveEmbeddedPasswordsToCredentialStore()
         reportUnreadableConnections()
+        reportUnreadableSavedQueries()
         if pendingOpenURLs.isEmpty {
             showWelcome(nil)
         } else {

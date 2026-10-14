@@ -6,6 +6,8 @@ import FoxlumeQueryCore
 final class HistoryViewController: NSViewController {
     private let workspace: ConnectionWorkspace
     var onOpen: ((String, _ run: Bool) -> Void)?
+    /// "Add to Saved Queries…" on a row.
+    var onSaveQuery: ((String) -> Void)?
 
     private let searchField = NSSearchField()
     private let scope = NSSegmentedControl(labels: ["This Connection", "All"], trackingMode: .selectOne, target: nil, action: nil)
@@ -116,6 +118,18 @@ final class HistoryViewController: NSViewController {
         NSPasteboard.general.setString(entry.sql, forType: .string)
     }
 
+    @objc private func saveEntry(_ sender: Any?) {
+        let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
+        guard let entry = entries[safe: row] else { return }
+        onSaveQuery?(entry.sql)
+    }
+
+    /// Saves the newest entry shown, for scripted checks.
+    func saveFirstEntry() {
+        guard let entry = entries.first else { return }
+        onSaveQuery?(entry.sql)
+    }
+
     @objc private func deleteEntry(_ sender: Any?) {
         let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
         guard let entry = entries[safe: row] else { return }
@@ -156,7 +170,8 @@ extension HistoryViewController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         guard table.clickedRow >= 0 else { return }
-        for (title, action) in [("Open in Editor", #selector(openEntry(_:))), ("Run in New Tab", #selector(runEntry(_:))), ("Copy SQL", #selector(copyEntry(_:))), ("Delete", #selector(deleteEntry(_:)))] {
+        for (title, action) in [("Open in Editor", #selector(openEntry(_:))), ("Run in New Tab", #selector(runEntry(_:))), ("Copy SQL", #selector(copyEntry(_:))),
+                                ("Add to Saved Queries…", #selector(saveEntry(_:))), ("Delete", #selector(deleteEntry(_:)))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             menu.addItem(item)

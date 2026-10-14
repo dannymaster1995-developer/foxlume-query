@@ -34,6 +34,9 @@ public enum AppPaths {
     public static var connectionsFile: URL { dataDirectory.appendingPathComponent("connections.json") }
     public static var settingsFile: URL { dataDirectory.appendingPathComponent("settings.json") }
     public static var historyDatabase: URL { dataDirectory.appendingPathComponent("history.sqlite") }
+    public static var savedQueriesFile: URL { dataDirectory.appendingPathComponent("saved-queries.json") }
+    /// What Open Quickly remembers about recently chosen items, per connection.
+    public static var openQuicklyFile: URL { dataDirectory.appendingPathComponent("open-quickly.json") }
     /// Host keys accepted for SSH tunnels, kept apart from the user's own ~/.ssh/known_hosts.
     public static var knownHostsFile: URL { dataDirectory.appendingPathComponent("known_hosts") }
     public static var portableCredentialsFile: URL { dataDirectory.appendingPathComponent("credentials.json") }
