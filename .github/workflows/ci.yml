@@ -7,9 +7,15 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    # macOS 26 ships Xcode 26 by default, close to the Swift 6.3 toolchain the project is developed with.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcode-select -p
+          swift --version
 
       - name: Cache DuckDB download
         uses: actions/cache@v4

@@ -19,7 +19,7 @@ fi
 
 mkdir -p "$WORK" "$VENDOR"
 if [ ! -f "$WORK/$ARCHIVE" ] || ! echo "$SHA256  $WORK/$ARCHIVE" | shasum -a 256 -c - >/dev/null 2>&1; then
-  echo "Downloading DuckDB $VERSION…"
+  echo "Downloading DuckDB ${VERSION}..."
   curl -fL --retry 3 -o "$WORK/$ARCHIVE" "$URL"
 fi
 echo "$SHA256  $WORK/$ARCHIVE" | shasum -a 256 -c -
