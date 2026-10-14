@@ -1,14 +1,15 @@
 import AppKit
 import FoxlumeQueryCore
 
-/// Columns, indexes, foreign keys and DDL of one table. PostgreSQL and MySQL tables can be edited here;
+/// Columns, indexes, foreign keys, CHECK constraints, triggers and DDL of one table. CHECK constraints and triggers
+/// are read-only (StructureViewController+Extras.swift). PostgreSQL and MySQL tables can be edited here;
 /// edits stay pending until Save, like grid edits.
 @MainActor
 final class StructureViewController: NSViewController {
-    private let workspace: ConnectionWorkspace
-    private let table: TableRef
+    let workspace: ConnectionWorkspace
+    let table: TableRef
     private let picker = NSSegmentedControl(labels: ["Columns", "Indexes", "Foreign Keys", "DDL"], trackingMode: .selectOne, target: nil, action: nil)
-    private let grid = DataGridView()
+    let grid = DataGridView()
     private let ddlView = SQLEditorView()
     private let status = UI.label("", size: 11, color: .secondaryLabelColor)
     private let body = NSView()
@@ -18,6 +19,10 @@ final class StructureViewController: NSViewController {
     private lazy var removeButton = UI.iconButton("minus", tooltip: "Delete Selected (⌫)", target: self, action: #selector(removeRowsClicked(_:)))
     private var structure: TableStructure?
     private var ddl: String?
+    /// Loaded the first time their section shows, and again after a reload or save.
+    var triggers: [TriggerInfo]?
+    var checkConstraints: [CheckConstraintInfo]?
+    var extrasError: Error?
     /// The editor, for engines that support structure editing. Read-only structures use the grid.
     private(set) var editor: StructureDraftEditor?
     private(set) var isSaving = false
@@ -47,6 +52,8 @@ final class StructureViewController: NSViewController {
         var sections: [(String, Int)] = [("Columns", 0)]
         if capabilities.supportsIndexes { sections.append(("Indexes", 1)) }
         if capabilities.supportsForeignKeys { sections.append(("Foreign Keys", 2)) }
+        if showsCheckConstraints { sections.append(("Check Constraints", Self.checkSection)) }
+        if showsTriggers { sections.append(("Triggers", Self.triggerSection)) }
         if capabilities.supportsDDL { sections.append(("DDL", 3)) }
         picker.segmentCount = sections.count
         for (index, section) in sections.enumerated() {
@@ -148,6 +155,7 @@ final class StructureViewController: NSViewController {
         workspace.invalidateStructure(of: table)
         structure = nil
         ddl = nil
+        resetExtras()
         load(force: true)
     }
 
@@ -214,8 +222,8 @@ final class StructureViewController: NSViewController {
 
     private func render() {
         let section = selectedSection
-        let editing = editor != nil && section != 3
-        grid.isHidden = section == 3 || editor != nil
+        let editing = editor != nil && section <= 2
+        grid.isHidden = section == 3 || (editor != nil && section <= 2)
         ddlView.isHidden = section != 3
         editor?.isHidden = !editing
         commentRow.isHidden = !editing
@@ -229,6 +237,9 @@ final class StructureViewController: NSViewController {
         updateComment()
         updateButtons()
         updateStatus()
+        if section == Self.checkSection || section == Self.triggerSection {
+            return renderExtras(section)
+        }
         guard let structure else { return }
         switch section {
         case 0 where editor == nil:
@@ -301,11 +312,12 @@ final class StructureViewController: NSViewController {
             default: break
             }
         }
+        if let extras = extrasStatus(section) { parts = [extras] }
         status.stringValue = parts.joined(separator: " · ")
     }
 
     private func updateButtons() {
-        let editable = editor != nil && selectedSection != 3
+        let editable = editor != nil && selectedSection <= 2
         addButton.isHidden = !editable
         removeButton.isHidden = !editable
         let enabled = canEdit() && !isSaving
@@ -338,12 +350,12 @@ final class StructureViewController: NSViewController {
 
     func addRow() {
         guard let editor, canEditNow else { return NSSound.beep() }
-        if selectedSection == 3 { showSection(0) }
+        if selectedSection > 2 { showSection(0) }
         editor.addRow()
     }
 
     func deleteSelectedRows() {
-        guard let editor, canEditNow, selectedSection != 3 else { return NSSound.beep() }
+        guard let editor, canEditNow, selectedSection <= 2 else { return NSSound.beep() }
         editor.deleteSelectedRows()
     }
 
@@ -433,6 +445,7 @@ final class StructureViewController: NSViewController {
                 try await workspace.applySchemaStatements(statements, transactional: transactional)
                 setSaving(false)
                 ddl = nil
+                resetExtras()
                 load(force: true)
                 onSaved?()
             } catch {

@@ -2,7 +2,7 @@ import AppKit
 import FoxlumeQueryCore
 
 /// Everything Open Quickly can offer from the window it was opened in and the other open connections: tables and
-/// views, databases, schemas, saved queries and recent history. Tables of the connection's other schemas (MySQL:
+/// views, databases, schemas, procedures, functions, triggers and types, saved queries and recent history. Tables of the connection's other schemas (MySQL:
 /// other databases) are loaded on first need, through the completion cache, so a second visit costs nothing.
 @MainActor
 final class OpenQuicklyCatalog {
@@ -70,6 +70,14 @@ final class OpenQuicklyCatalog {
                 for schema in workspace.schemas {
                     items.append(make(.schema, schema, schema == workspace.currentSchema ? "Current schema" : "Schema", .schema(schema)))
                 }
+            }
+            // Procedures, functions, triggers and types of the browsed schema, labeled as in the sidebar.
+            let objects = workspace.schemaObjects
+            let labels = SchemaObject.labels(for: objects)
+            for object in objects {
+                let subtitle = object.kind == .trigger ? (object.table ?? location) : location
+                items.append(make(QuickOpenKind.kind(of: object.kind), labels[object.id] ?? object.name, subtitle, .schemaObject(object),
+                                  container: object.schema ?? currentContainer))
             }
         }
 

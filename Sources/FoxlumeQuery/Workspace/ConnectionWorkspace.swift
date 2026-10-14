@@ -45,6 +45,8 @@ final class ConnectionWorkspace {
     private var prefetchTask: Task<Void, Never>?
     /// Engine and caches behind editor completion; see ConnectionWorkspace+Completion.swift.
     let completionCatalog = CompletionCatalog()
+    /// Procedures, functions, triggers and types of the browsed schema; see ConnectionWorkspace+SchemaObjects.swift.
+    let schemaObjectCatalog = SchemaObjectCatalog()
 
     init(config: ConnectionConfig, password: String, sshSecret: String? = nil) {
         self.config = config
@@ -106,6 +108,7 @@ final class ConnectionWorkspace {
         if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
         prefetchTask?.cancel()
         completionCatalog.cancelLoads()
+        schemaObjectCatalog.cancel()
         for task in structureTasks.values { task.cancel() }
         await session.close()
     }
@@ -153,6 +156,7 @@ final class ConnectionWorkspace {
             structures.removeAll()
             completionCatalog.catalogDidRefresh()
             prefetchStructures()
+            loadSchemaObjects()
         } catch {
             lastError = error
             noteFailure(error)
@@ -483,7 +487,7 @@ final class ConnectionWorkspace {
         }
     }
 
-    private func notifyMetadata() {
+    func notifyMetadata() {
         NotificationCenter.default.post(name: Self.metadataDidChange, object: self)
     }
 }

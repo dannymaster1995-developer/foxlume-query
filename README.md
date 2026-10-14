@@ -43,7 +43,8 @@ they have had less testing and some features are missing.
 - MongoDB edits keep BSON types (Int64, Decimal128, ObjectId, dates), including nested values; fields can be removed.
 - Rename tables and views right away; Truncate and Drop are staged until Save, with "Ignore foreign key checks" and "Cascade" options.
 - Create and drop databases (PostgreSQL, MySQL) and schemas (PostgreSQL) from the Database menu.
-- Structure view with columns, indexes, foreign keys and DDL. On PostgreSQL and MySQL it is an editor: add, change and drop columns (type, nullable, default, primary key, auto increment, comment), indexes, foreign keys and the table comment, preview the ALTER statements and save them. New Table builds a CREATE TABLE with a live SQL preview.
+- Procedures, Functions, Triggers and Types groups in the sidebar (PostgreSQL; MySQL and MariaDB without Types; SQLite triggers; DuckDB macros as functions), with overloads shown with their arguments and each trigger with its table. Double-click opens the definition in a read-only tab with Copy, Save As and Edit in Query Tab (CREATE OR REPLACE on PostgreSQL, DROP + CREATE on MySQL, no DELIMITER needed); the context menu adds Copy Name, Copy Definition, New Trigger… and Drop… (asked first, Safe Mode applies, never on read-only connections). Open Quickly and the sidebar filter find them too.
+- Structure view with columns, indexes, foreign keys, check constraints, triggers and DDL. On PostgreSQL and MySQL it is an editor: add, change and drop columns (type, nullable, default, primary key, auto increment, comment), indexes, foreign keys and the table comment, preview the ALTER statements and save them. New Table builds a CREATE TABLE with a live SQL preview.
 - Copy rows as TSV, CSV, JSON, INSERT statements or Markdown, or export a result to a file.
 
 **Import and export** (SQL engines)
@@ -68,7 +69,7 @@ they have had less testing and some features are missing.
 **Everything else**
 - System, Light or Dark appearance; 13 built-in editor themes (Dracula, One Dark, Nord, Solarized, Catppuccin …) and import of VS Code themes (`.json` or `.vsix`).
 - Searchable query history (SQLite full-text search); any entry can be kept as a saved query.
-- Open Quickly (⇧⌘O): one fuzzy search over tables and views (all schemas), databases, schemas, saved queries and recent history, with the tables, saved queries and history of the other open connections. Results rank by match and by how often and recently you opened them.
+- Open Quickly (⇧⌘O): one fuzzy search over tables and views (all schemas), databases, schemas, procedures, functions, triggers and types, saved queries and recent history, with the tables, saved queries and history of the other open connections. Results rank by match and by how often and recently you opened them.
 - Open tabs come back when you reopen a connection; ⇧⌘T reopens a closed tab.
 
 **Not there yet:** SQL Server and many other engines, a graphical plan diagram, ER diagrams, JSON and XLSX import. TLS connections are limited to TLS 1.2 for now.

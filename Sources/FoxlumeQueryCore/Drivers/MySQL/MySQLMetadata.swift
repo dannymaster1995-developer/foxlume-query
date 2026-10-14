@@ -156,17 +156,17 @@ extension MySQLConnection {
 
     // MARK: - Helpers
 
-    private func rows(_ sql: String) throws -> [[CellValue]] {
+    func rows(_ sql: String) throws -> [[CellValue]] {
         try runQuery(sql, rowLimit: nil).first?.rows ?? []
     }
 
     /// The database to filter catalog tables by: the named one, or the session's current database.
-    private func databaseExpression(_ database: String?) -> String {
+    func databaseExpression(_ database: String?) -> String {
         guard let database, !database.isEmpty else { return "DATABASE()" }
         return dialect.quoteString(database)
     }
 
-    private static func cell(_ row: [CellValue], _ index: Int) -> String? {
+    static func cell(_ row: [CellValue], _ index: Int) -> String? {
         guard index < row.count else { return nil }
         return string(row[index])
     }

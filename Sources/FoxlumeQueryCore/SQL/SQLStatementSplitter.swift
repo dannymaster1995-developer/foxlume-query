@@ -7,6 +7,10 @@ public struct SQLStatementRange: Hashable, Sendable {
 }
 
 /// Splits SQL text on `;` while respecting quotes, comments and PostgreSQL dollar quoting.
+///
+/// Routine bodies written as compound statements stay whole: inside `CREATE FUNCTION | PROCEDURE | TRIGGER | EVENT`,
+/// a `;` between `BEGIN` and its `END` does not end the statement (MySQL and MariaDB stored programs, SQLite triggers,
+/// PostgreSQL `BEGIN ATOMIC` bodies). So such a script runs without the `DELIMITER` command of the mysql client.
 public enum SQLStatementSplitter {
     public static func split(_ sql: String, family: SQLDialect.Family = .postgresql) -> [SQLStatementRange] {
         let units = Array(sql.utf16)
@@ -14,6 +18,7 @@ public enum SQLStatementSplitter {
         var start = 0
         var index = 0
         let count = units.count
+        var block = BlockTracker()
 
         func emit(upTo end: Int) {
             let range = NSRange(location: start, length: end - start)
@@ -41,15 +46,110 @@ public enum SQLStatementSplitter {
                     index += 1
                 }
             case 0x3B: // ;
+                if block.semicolonIsInsideBody() {
+                    index += 1
+                    continue
+                }
                 emit(upTo: index)
                 index += 1
                 start = index
-            default:
+                block = BlockTracker()
+            case 0x28: // (
+                block.sawParenthesis()
                 index += 1
+            default:
+                guard isWordStart(c), index == 0 || !isWordPart(units[index - 1]) else {
+                    index += 1
+                    continue
+                }
+                var end = index + 1
+                while end < count, isWordPart(units[end]) { end += 1 }
+                // `NEW.end` or `t.begin` name a column, not a keyword.
+                let qualified = index > 0 && units[index - 1] == 0x2E
+                if !qualified { block.word(units, index, end) }
+                index = end
             }
         }
         emit(upTo: count)
         return statements
+    }
+
+    /// Follows the words of one statement to tell when a `;` sits inside a routine body.
+    struct BlockTracker {
+        private enum Kind { case unknown, routine, other }
+        private static let routineWords: Set<String> = ["FUNCTION", "PROCEDURE", "TRIGGER", "EVENT"]
+        private static let otherWords: Set<String> = [
+            "TABLE", "VIEW", "INDEX", "SCHEMA", "DATABASE", "SEQUENCE", "TYPE", "DOMAIN", "USER", "ROLE",
+            "MATERIALIZED", "EXTENSION", "AS", "SELECT",
+        ]
+        /// What follows an END that closes a statement which never opened a block.
+        private static let nonBlockEnds: Set<String> = ["IF", "LOOP", "WHILE", "REPEAT"]
+
+        private var kind = Kind.unknown
+        private var words = 0
+        private var depth = 0
+        /// The previous word was END; the next token tells whether it closes a block (END, END CASE, END label)
+        /// or an IF / LOOP / WHILE / REPEAT statement.
+        private var pendingEnd = false
+
+        /// Called at a `;`: whether it is inside a routine body and so does not end the statement.
+        mutating func semicolonIsInsideBody() -> Bool {
+            resolvePendingEnd(closes: true)
+            return depth > 0
+        }
+
+        mutating func sawParenthesis() {
+            if kind == .unknown, words > 0 { kind = .other }
+            resolvePendingEnd(closes: true)
+        }
+
+        mutating func word(_ units: [UInt16], _ start: Int, _ end: Int) {
+            guard kind != .other else { return }
+            words += 1
+            let upper = end - start <= 12 ? SQLStatementSplitter.upperWord(units, start, end) : ""
+            switch kind {
+            case .unknown:
+                if words == 1 {
+                    if upper != "CREATE" { kind = .other }
+                } else if Self.routineWords.contains(upper) {
+                    kind = .routine
+                } else if Self.otherWords.contains(upper) || words > 12 {
+                    kind = .other
+                }
+            case .routine:
+                if pendingEnd {
+                    let closesBlock = !Self.nonBlockEnds.contains(upper)
+                    resolvePendingEnd(closes: closesBlock)
+                    // The word after END belongs to the END.
+                    if !closesBlock || upper == "CASE" { return }
+                }
+                switch upper {
+                case "BEGIN", "CASE": depth += 1
+                case "END" where depth > 0: pendingEnd = true
+                default: break
+                }
+            case .other:
+                return
+            }
+        }
+
+        private mutating func resolvePendingEnd(closes: Bool) {
+            guard pendingEnd else { return }
+            pendingEnd = false
+            if closes { depth = max(0, depth - 1) }
+        }
+    }
+
+    private static func isWordStart(_ unit: UInt16) -> Bool {
+        (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A) || unit == 0x5F
+    }
+
+    private static func isWordPart(_ unit: UInt16) -> Bool {
+        isWordStart(unit) || (unit >= 0x30 && unit <= 0x39) || unit == 0x24
+    }
+
+    fileprivate static func upperWord(_ units: [UInt16], _ start: Int, _ end: Int) -> String {
+        String(decoding: units[start..<end], as: UTF16.self).uppercased()
     }
 
     /// The statement containing `location` (a UTF-16 offset), or the closest one before it.

@@ -4,7 +4,7 @@ import FoxlumeQueryCore
 /// Table and view list for the current database / schema, with a filter field.
 @MainActor
 final class SidebarViewController: NSViewController {
-    private let workspace: ConnectionWorkspace
+    let workspace: ConnectionWorkspace
     var onOpenTable: ((TableRef, _ newTab: Bool) -> Void)?
     var onOpenStructure: ((TableRef) -> Void)?
     var onQueryTable: ((TableRef) -> Void)?
@@ -21,29 +21,49 @@ final class SidebarViewController: NSViewController {
     var onRunSQLFile: (() -> Void)?
     /// "New Table…" from the context menu; offered only where structure can be changed.
     var onNewTable: (() -> Void)?
+    /// A procedure, function, trigger or type was opened (double-click, Return, Show Definition).
+    var onOpenObject: ((SchemaObject) -> Void)?
+    /// Copy Definition, Edit in Query Tab, Drop… or New Trigger… on an object or its group; see SidebarViewController+SchemaObjects.swift.
+    var onObjectCommand: ((SchemaObjectCommand) -> Void)?
 
     private let filterField = NSSearchField()
     private let schemaPopup = NSPopUpButton()
-    private let outline = NSOutlineView()
+    let outline = NSOutlineView()
     private let statusLabel = UI.label("", size: 11, color: .secondaryLabelColor)
     private let spinner = NSProgressIndicator()
 
-    private final class Group {
+    final class Group {
         let title: String
         var items: [TableInfo]
         /// Folders and keys, for the Redis "Keys" section.
         var keyRoots: [KeyNode]?
         var keyCount = 0
+        /// Procedures, Functions, Triggers or Types: the objects, their row labels and the row shown when there are none.
+        var objectKind: SchemaObjectKind?
+        var objects: [SchemaObjectBox] = []
+        var note: SidebarNote?
         init(title: String, items: [TableInfo], keyRoots: [KeyNode]? = nil) {
             self.title = title
             self.items = items
             self.keyRoots = keyRoots
         }
 
-        var childCount: Int { keyRoots?.count ?? items.count }
+        var childCount: Int {
+            if objectKind != nil { return objects.isEmpty ? (note == nil ? 0 : 1) : objects.count }
+            return keyRoots?.count ?? items.count
+        }
+
+        var headerCount: Int {
+            if objectKind != nil { return objects.count }
+            return keyRoots == nil ? items.count : keyCount
+        }
     }
 
-    private var groups: [Group] = []
+    private(set) var groups: [Group] = []
+    /// Titles of the groups the user collapsed (or that start collapsed), kept while the window lives.
+    var collapsedGroups: Set<String> = Set(SchemaObjectKind.allCases.map(\.title))
+    /// Set while `reload` expands groups, so those expansions are not taken for the user's.
+    var isRestoringExpansion = false
 
     init(workspace: ConnectionWorkspace) {
         self.workspace = workspace
@@ -168,18 +188,27 @@ final class SidebarViewController: NSViewController {
             Group(title: capabilities.objectNounPlural.capitalized, items: tables),
             Group(title: "Views", items: views),
             Group(title: "System", items: system),
-            Group(title: "Databases", items: keyspaces),
         ].filter { !$0.items.isEmpty }
+        newGroups += objectGroups(filter: filter)
+        newGroups += [Group(title: "Databases", items: keyspaces)].filter { !$0.items.isEmpty }
         if let listing = workspace.keyListing {
             let keys = listing.keys.filter { filter.isEmpty || $0.name.lowercased().contains(filter) }
             let group = Group(title: "Keys", items: [], keyRoots: KeyNode.tree(keys, separator: workspace.keySeparator, truncated: listing.truncated, limit: ConnectionWorkspace.keyTreeLimit))
             group.keyCount = keys.count
             newGroups.append(group)
         }
+        let selectedObject = selectedSchemaObject
         groups = newGroups
         outline.reloadData()
-        for group in groups { outline.expandItem(group) }
+        isRestoringExpansion = true
+        for group in groups {
+            // While filtering, every group with matches opens; otherwise the user's choice holds.
+            let opens = !collapsedGroups.contains(group.title) || (!filter.isEmpty && group.objectKind != nil && !group.objects.isEmpty)
+            if opens { outline.expandItem(group) }
+        }
+        isRestoringExpansion = false
         if let selected { select(selected) }
+        if let selectedObject { select(selectedObject) }
 
         if workspace.isLoadingTables {
             spinner.startAnimation(nil)
@@ -216,6 +245,7 @@ final class SidebarViewController: NSViewController {
 
     // NSOutlineView needs stable object identity per item.
     private var boxes: [TableRef: TableInfoBox] = [:]
+    var objectBoxes: [String: SchemaObjectBox] = [:]
     private func box(for info: TableInfo) -> TableInfoBox {
         if let existing = boxes[info.ref], existing.info == info { return existing }
         let box = TableInfoBox(info)
@@ -239,6 +269,7 @@ final class SidebarViewController: NSViewController {
             open(node, newTab: newTab)
             return
         }
+        // Opening an object's source is a round trip, so a single click only selects it, as in TablePro.
         guard let info = (item as? TableInfoBox)?.info else { return }
         onOpenTable?(info.ref, newTab)
     }
@@ -247,6 +278,10 @@ final class SidebarViewController: NSViewController {
         let item = outline.item(atRow: outline.clickedRow)
         if let node = item as? KeyNode {
             open(node, newTab: true)
+            return
+        }
+        if let object = (item as? SchemaObjectBox)?.object {
+            onOpenObject?(object)
             return
         }
         guard let info = (item as? TableInfoBox)?.info else { return }
@@ -285,6 +320,10 @@ final class SidebarViewController: NSViewController {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36, let table = selectedTable {
             onOpenTable?(table, false)
+            return
+        }
+        if event.keyCode == 36, let object = selectedSchemaObject {
+            onOpenObject?(object)
             return
         }
         super.keyDown(with: event)
@@ -466,6 +505,10 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         if item == nil { return groups[index] }
         if let node = item as? KeyNode { return node.children[index] }
         guard let group = item as? Group else { return NSNull() }
+        if group.objectKind != nil {
+            if group.objects.isEmpty, let note = group.note { return note }
+            return group.objects[index]
+        }
         if let roots = group.keyRoots { return roots[index] }
         return box(for: group.items[index])
     }
@@ -479,15 +522,21 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is TableInfoBox || ((item as? KeyNode)?.isNote == false)
+        item is TableInfoBox || item is SchemaObjectBox || ((item as? KeyNode)?.isNote == false)
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let group = item as? Group {
             let identifier = NSUserInterfaceItemIdentifier("header")
             let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? makeCell(identifier: identifier, withImage: false)
-            cell.textField?.stringValue = "\(group.title) (\((group.keyRoots == nil ? group.items.count : group.keyCount).groupedText))"
+            cell.textField?.stringValue = "\(group.title) (\(group.headerCount.groupedText))"
             return cell
+        }
+        if let object = item as? SchemaObjectBox {
+            return objectCell(object, in: outlineView)
+        }
+        if let note = item as? SidebarNote {
+            return noteCell(note, in: outlineView)
         }
         if let node = item as? KeyNode {
             let identifier = NSUserInterfaceItemIdentifier("table")
@@ -578,6 +627,7 @@ extension SidebarViewController: NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        if addObjectMenuItems(to: menu) { return }
         func item(_ title: String, _ action: Selector) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self

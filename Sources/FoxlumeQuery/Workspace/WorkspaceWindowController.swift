@@ -82,6 +82,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         sidebar.onImportCSV = { [weak self] table in self?.presentImportCSV(into: table) }
         sidebar.onRunSQLFile = { [weak self] in self?.presentRunSQLFile(file: nil) }
         sidebar.onNewTable = { [weak self] in self?.newTable(nil) }
+        sidebar.onOpenObject = { [weak self] object in self?.openObjectSource(object) }
+        sidebar.onObjectCommand = { [weak self] command in self?.performObjectCommand(command) }
+        tabs.onObjectCommand = { [weak self] command in self?.performObjectCommand(command) }
         sidebar.onQueryTable = { [weak self] table in
             guard let self else { return }
             let sql = "SELECT * FROM \(self.workspace.dialect.qualifiedName(table)) LIMIT 100;"
@@ -440,6 +443,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
     func applySidebarFilter(_ text: String) {
         sidebar.setFilter(text)
     }
+
+    /// The sidebar, for the schema object commands and scripted checks in WorkspaceWindowController+SchemaObjects.swift.
+    var sidebarController: SidebarViewController { sidebar }
 
     /// The table selected in the sidebar, which File menu commands act on.
     var sidebarSelection: TableRef? { sidebar.selectedTable }

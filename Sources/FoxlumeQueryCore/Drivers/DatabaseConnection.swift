@@ -88,6 +88,16 @@ public protocol DatabaseConnection: AnyObject {
 
     /// Keys of the current database for a key/value sidebar tree. Nil for engines without keys.
     func browseKeys(pattern: String, limit: Int) throws -> KeyListing?
+
+    /// Procedures, functions, triggers or types of a schema (MySQL: the current database), without system and
+    /// extension-owned objects. Empty for kinds the engine does not list. See SchemaObjects.swift.
+    func schemaObjects(_ kind: SchemaObjectKind, schema: String?) throws -> [SchemaObject]
+    /// The CREATE statement of an object listed by `schemaObjects`.
+    func definition(of object: SchemaObject) throws -> SchemaObjectDefinition
+    /// Triggers of one table, for the Structure view.
+    func triggers(of table: TableRef) throws -> [TriggerInfo]
+    /// CHECK constraints of one table, for the Structure view. Empty where the server ignores CHECK.
+    func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo]
 }
 
 /// Keys found by a scan, for the Redis key tree.
@@ -214,6 +224,16 @@ public extension DatabaseConnection {
     var capabilities: EngineCapabilities { .relational(dialect.family) }
 
     func browseKeys(pattern: String, limit: Int) throws -> KeyListing? { nil }
+
+    func schemaObjects(_ kind: SchemaObjectKind, schema: String?) throws -> [SchemaObject] { [] }
+
+    func definition(of object: SchemaObject) throws -> SchemaObjectDefinition {
+        throw DatabaseError.unsupported("\(kind.displayName) cannot show the definition of a \(object.kind.noun).")
+    }
+
+    func triggers(of table: TableRef) throws -> [TriggerInfo] { [] }
+
+    func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo] { [] }
 
     func ping() throws {
         switch capabilities.queryLanguage {

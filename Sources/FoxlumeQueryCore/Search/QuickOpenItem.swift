@@ -7,6 +7,10 @@ public enum QuickOpenKind: String, Sendable, CaseIterable, Comparable {
     case systemTable
     case database
     case schema
+    case procedure
+    case function
+    case trigger
+    case type
     case savedQuery
     case history
 
@@ -17,6 +21,10 @@ public enum QuickOpenKind: String, Sendable, CaseIterable, Comparable {
         case .systemTable: return "System Tables"
         case .database: return "Databases"
         case .schema: return "Schemas"
+        case .procedure: return "Procedures"
+        case .function: return "Functions"
+        case .trigger: return "Triggers"
+        case .type: return "Types"
         case .savedQuery: return "Saved Queries"
         case .history: return "Recent Queries"
         }
@@ -29,6 +37,8 @@ public enum QuickOpenKind: String, Sendable, CaseIterable, Comparable {
         case .view: return 0.98
         case .database: return 0.95
         case .schema: return 0.93
+        case .procedure, .function: return 0.92
+        case .trigger, .type: return 0.91
         case .savedQuery: return 0.9
         case .systemTable: return 0.85
         case .history: return 0.7
@@ -37,6 +47,8 @@ public enum QuickOpenKind: String, Sendable, CaseIterable, Comparable {
 
     public var isTableLike: Bool { self == .table || self == .view || self == .systemTable }
     public var isQuery: Bool { self == .savedQuery || self == .history }
+    /// Procedures, functions, triggers and types, which open their source.
+    public var isSchemaObject: Bool { self == .procedure || self == .function || self == .trigger || self == .type }
 
     public static func < (lhs: QuickOpenKind, rhs: QuickOpenKind) -> Bool {
         allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
@@ -47,6 +59,15 @@ public enum QuickOpenKind: String, Sendable, CaseIterable, Comparable {
         case .view, .materializedView: return .view
         case .systemTable: return .systemTable
         case .table, .foreignTable, .keyspace: return .table
+        }
+    }
+
+    public static func kind(of object: SchemaObjectKind) -> QuickOpenKind {
+        switch object {
+        case .procedure: return .procedure
+        case .function: return .function
+        case .trigger: return .trigger
+        case .type: return .type
         }
     }
 }
@@ -89,6 +110,8 @@ public struct QuickOpenItem: Sendable, Hashable, Identifiable {
         case schema(String)
         case savedQuery(UUID)
         case history(Int64)
+        /// A procedure, function, trigger or type of the browsed schema.
+        case schemaObject(SchemaObject)
     }
 
     public var kind: QuickOpenKind
@@ -132,6 +155,7 @@ public struct QuickOpenItem: Sendable, Hashable, Identifiable {
         case .schema(let name): return "schema:" + name
         case .savedQuery(let id): return "saved:" + id.uuidString
         case .history: return "history:" + Self.historyKey(sql ?? title)
+        case .schemaObject(let object): return Self.objectKey(object)
         }
     }
 
@@ -140,6 +164,11 @@ public struct QuickOpenItem: Sendable, Hashable, Identifiable {
     /// The recency key of a table, also recorded when its tab is opened outside Open Quickly.
     public static func tableKey(_ ref: TableRef) -> String {
         "table:" + (ref.schema.map { $0 + "." } ?? "") + ref.name
+    }
+
+    /// The recency key of a procedure, function, trigger or type, also recorded when its source tab opens.
+    public static func objectKey(_ object: SchemaObject) -> String {
+        "object:" + object.id
     }
 
     /// History entries are remembered by their text, so a re-run of the same SQL is the same item.

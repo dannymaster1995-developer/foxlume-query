@@ -97,6 +97,8 @@ final class AutoTestRunner {
             try await performExplain(command, argument)
         case _ where GridAutoTest.commands.contains(command):
             try await performGrid(command, argument)
+        case _ where RoutinesAutoTest.commands.contains(command):
+            try await performRoutines(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
             for window in NSApp.windows {

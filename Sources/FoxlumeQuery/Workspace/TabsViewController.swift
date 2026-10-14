@@ -37,6 +37,8 @@ final class TabsViewController: NSViewController {
     /// Recently closed tabs, newest last, for Reopen Closed Tab.
     private var closedTabs: [(table: TableRef?, sql: String?, title: String?, fileURL: URL?)] = []
     var onSelectionChange: ((WorkspaceTab?) -> Void)?
+    /// Where a source tab's Edit in Query Tab goes; set by the window.
+    var onObjectCommand: ((SchemaObjectCommand) -> Void)?
 
     init(workspace: ConnectionWorkspace) {
         self.workspace = workspace
@@ -133,6 +135,32 @@ final class TabsViewController: NSViewController {
         select(id: tab.id)
         if run { controller.runAll(nil) }
         return controller
+    }
+
+    /// Shows an object's source in its own tab; an object already open gets its tab focused.
+    @discardableResult
+    func openObjectSource(_ object: SchemaObject) -> ObjectSourceViewController {
+        if let existing = tabs.first(where: { ($0.content as? ObjectSourceViewController)?.object.id == object.id }),
+           let controller = existing.content as? ObjectSourceViewController {
+            select(id: existing.id)
+            // A tab that could not read the source (restored before the object existed, say) tries again.
+            if controller.loadError != nil { controller.reload(nil) }
+            return controller
+        }
+        let controller = ObjectSourceViewController(workspace: workspace, object: object)
+        controller.onCommand = { [weak self] command in self?.onObjectCommand?(command) }
+        let tab = WorkspaceTab(content: controller, isPreview: false)
+        tabs.append(tab)
+        install(tab)
+        select(id: tab.id)
+        return controller
+    }
+
+    /// Closes the source tabs of an object after it was dropped.
+    func closeObjectTabs(_ object: SchemaObject) {
+        for index in tabs.indices.reversed() where (tabs[index].content as? ObjectSourceViewController)?.object.id == object.id {
+            remove(at: index)
+        }
     }
 
     private func install(_ tab: WorkspaceTab) {
@@ -272,6 +300,12 @@ final class TabsViewController: NSViewController {
             var filePath: String?
             var schema: String?
             var name: String?
+            /// A source tab: the object's kind, table (triggers) and arguments; `schema` and `name` hold the rest.
+            var objectKind: String?
+            var objectTable: String?
+            var objectArguments: String?
+            var objectIdentity: String?
+            var objectDetail: String?
         }
 
         var tabs: [Tab]
@@ -289,6 +323,12 @@ final class TabsViewController: NSViewController {
             if let query = tab.content as? QueryTabViewController {
                 return SavedState.Tab(kind: "query", title: query.tabTitle, sql: query.sql, filePath: query.fileURL?.path)
             }
+            if let source = tab.content as? ObjectSourceViewController {
+                let object = source.object
+                return SavedState.Tab(kind: "object", schema: object.schema, name: object.name, objectKind: object.kind.rawValue,
+                                      objectTable: object.table, objectArguments: object.arguments,
+                                      objectIdentity: object.identityArguments, objectDetail: object.detail)
+            }
             let table = tab.table
             return SavedState.Tab(kind: "table", schema: table?.schema, name: table?.name)
         }
@@ -305,6 +345,12 @@ final class TabsViewController: NSViewController {
         for tab in state.tabs {
             if tab.kind == "query" {
                 openQuery(sql: tab.sql ?? "", title: tab.title, fileURL: tab.filePath.map { URL(fileURLWithPath: $0) })
+            } else if tab.kind == "object" {
+                // The text is fetched again; an object that is gone shows "Source Unavailable".
+                if let name = tab.name, let kind = tab.objectKind.flatMap(SchemaObjectKind.init(rawValue:)) {
+                    openObjectSource(SchemaObject(kind: kind, schema: tab.schema, name: name, arguments: tab.objectArguments,
+                                                  identityArguments: tab.objectIdentity, table: tab.objectTable, detail: tab.objectDetail))
+                }
             } else if let name = tab.name {
                 let ref = TableRef(schema: tab.schema, name: name)
                 if known.contains(ref) { openTable(ref, newTab: true) }

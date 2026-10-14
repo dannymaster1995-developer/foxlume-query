@@ -95,6 +95,8 @@ final class OpenQuicklyRowView: NSTableCellView {
         case .table, .view, .systemTable: return item.isOpen ? "Switch to Tab" : "Open"
         case .database, .schema: return "Switch"
         case .savedQuery, .history: return "Open Query"
+        case .procedure, .function, .trigger: return "Show DDL"
+        case .type: return "Show Definition"
         }
     }
 
@@ -107,6 +109,10 @@ final class OpenQuicklyRowView: NSTableCellView {
         case .schema: return ("square.stack.3d.up", .systemTeal)
         case .savedQuery: return ("star.fill", .systemYellow)
         case .history: return ("clock.arrow.circlepath", .systemOrange)
+        case .procedure: return ("curlybraces.square", .systemTeal)
+        case .function: return ("function", .systemTeal)
+        case .trigger: return ("bolt", .systemOrange)
+        case .type: return ("cube", .systemIndigo)
         }
     }
 }

@@ -49,6 +49,8 @@ extension WorkspaceWindowController {
             target.openSavedQuery(query, newTab: newTab)
         case .history:
             target.openSQL(item.sql ?? item.title, title: nil, newTab: newTab)
+        case .schemaObject(let object):
+            target.openObjectSource(object)
         }
     }
 }

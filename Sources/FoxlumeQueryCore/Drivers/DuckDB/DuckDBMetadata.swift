@@ -130,16 +130,16 @@ extension DuckDBConnection {
 
     // MARK: - Helpers
 
-    private func rows(_ sql: String) throws -> [[CellValue]] {
+    func rows(_ sql: String) throws -> [[CellValue]] {
         try execute(sql, rowLimit: nil).last?.rows ?? []
     }
 
-    private func schemaExpression(_ schema: String?) -> String {
+    func schemaExpression(_ schema: String?) -> String {
         guard let schema, !schema.isEmpty else { return "current_schema()" }
         return dialect.quoteString(schema)
     }
 
-    private static func cell(_ row: [CellValue], _ index: Int) -> String? {
+    static func cell(_ row: [CellValue], _ index: Int) -> String? {
         guard row.indices.contains(index) else { return nil }
         return row[index].textValue
     }
@@ -180,7 +180,7 @@ extension DuckDBConnection {
         return items
     }
 
-    private static func list(_ row: [CellValue], _ index: Int) -> [String] {
+    static func list(_ row: [CellValue], _ index: Int) -> [String] {
         guard let joined = cell(row, index), !joined.isEmpty else { return [] }
         return joined.components(separatedBy: "\u{1F}")
     }
