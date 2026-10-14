@@ -123,14 +123,13 @@ extension SidebarViewController {
     }
 
     func objectCell(_ box: SchemaObjectBox, in outlineView: NSOutlineView) -> NSView {
-        let identifier = NSUserInterfaceItemIdentifier("table")
-        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? makeObjectCell(identifier: identifier)
-        let font = cell.textField?.font ?? Theme.monospaced(12)
-        let text = NSMutableAttributedString(string: box.label, attributes: [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: Self.singleLine])
-        if box.object.kind == .trigger, let table = box.object.table {
-            text.append(NSAttributedString(string: "  \(table)", attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: Self.singleLine]))
-        }
-        cell.textField?.attributedStringValue = text
+        let identifier = NSUserInterfaceItemIdentifier("schemaObject")
+        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? ObjectCellView ?? makeObjectCell(identifier: identifier)
+        // Plain strings keep the sidebar's vibrant text colors; an attributed label color draws grey.
+        cell.textField?.stringValue = box.label
+        cell.textField?.textColor = .labelColor
+        cell.detailField.stringValue = box.object.kind == .trigger ? box.object.table ?? "" : ""
+        cell.detailField.isHidden = cell.detailField.stringValue.isEmpty
         cell.imageView?.image = Theme.image(Self.symbol(for: box.object), box.object.kind.label)
         cell.imageView?.contentTintColor = Self.tint(for: box.object.kind)
         cell.toolTip = box.object.tooltip
@@ -139,8 +138,9 @@ extension SidebarViewController {
     }
 
     func noteCell(_ note: SidebarNote, in outlineView: NSOutlineView) -> NSView {
-        let identifier = NSUserInterfaceItemIdentifier("table")
-        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? makeObjectCell(identifier: identifier)
+        let identifier = NSUserInterfaceItemIdentifier("schemaObjectNote")
+        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? ObjectCellView ?? makeObjectCell(identifier: identifier)
+        cell.detailField.isHidden = true
         cell.textField?.attributedStringValue = NSAttributedString(string: note.text, attributes: [
             .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: Self.singleLine,
         ])
@@ -150,17 +150,26 @@ extension SidebarViewController {
     }
 
     /// The same layout as the table rows: a 16-point icon, then the text.
-    private func makeObjectCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
-        let cell = NSTableCellView()
+    private func makeObjectCell(identifier: NSUserInterfaceItemIdentifier) -> ObjectCellView {
+        let cell = ObjectCellView()
         cell.identifier = identifier
         let text = NSTextField(labelWithString: "")
         text.translatesAutoresizingMaskIntoConstraints = false
         text.lineBreakMode = .byTruncatingTail
         text.font = Theme.monospaced(12)
+        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let detail = cell.detailField
+        detail.translatesAutoresizingMaskIntoConstraints = false
+        detail.lineBreakMode = .byTruncatingTail
+        detail.font = .systemFont(ofSize: 10)
+        detail.textColor = .tertiaryLabelColor
+        detail.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        detail.setContentHuggingPriority(.required, for: .horizontal)
         let image = NSImageView()
         image.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(image)
         cell.addSubview(text)
+        cell.addSubview(detail)
         cell.textField = text
         cell.imageView = image
         NSLayoutConstraint.activate([
@@ -168,8 +177,10 @@ extension SidebarViewController {
             image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             image.widthAnchor.constraint(equalToConstant: 16),
             text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            detail.leadingAnchor.constraint(equalTo: text.trailingAnchor, constant: 6),
+            detail.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+            detail.firstBaselineAnchor.constraint(equalTo: text.firstBaselineAnchor),
         ])
         return cell
     }
@@ -286,4 +297,9 @@ extension SidebarViewController {
     @objc private func menuRefreshObjects(_ sender: Any?) {
         workspace.refreshSchemaObjects()
     }
+}
+
+/// A sidebar row for a routine, trigger or type: the name, and for a trigger its table in small secondary text.
+final class ObjectCellView: NSTableCellView {
+    let detailField = NSTextField(labelWithString: "")
 }

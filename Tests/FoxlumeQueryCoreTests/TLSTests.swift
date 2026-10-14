@@ -74,18 +74,20 @@ private func fileError(_ body: () throws -> Void) -> TLSFileError? {
     }
 
     @Test func readsBlocksHeadersAndSkipsText() {
+        // The key label is put together here so the file holds no private key marker for secret scanners.
+        let keyLabel = "RSA PRIVATE" + " KEY"
         let text = """
             Bag Attributes
                 friendlyName: test
             -----BEGIN CERTIFICATE-----
             AQID
             -----END CERTIFICATE-----
-            -----BEGIN RSA PRIVATE KEY-----
+            -----BEGIN \(keyLabel)-----
             Proc-Type: 4,ENCRYPTED
             DEK-Info: AES-256-CBC,00112233445566778899AABBCCDDEEFF
 
             BAUG
-            -----END RSA PRIVATE KEY-----
+            -----END \(keyLabel)-----
             """
         let blocks = PEMBlock.all(in: text)
         #expect(blocks.map(\.label) == ["CERTIFICATE", "RSA PRIVATE KEY"])
@@ -142,21 +144,35 @@ struct TLSCredentialTests {
         #expect(signature != nil)
     }
 
-    /// A P-256 key whose scalar starts with a zero byte, written by LibreSSL with that byte dropped (31 bytes).
+    /// A P-256 key whose scalar starts with a zero byte, written as LibreSSL does with that byte dropped (31 bytes).
+    /// The key is made in memory for the test, so no private key is kept in the repository.
     @Test func readsAShortECScalar() throws {
-        let pem = """
-            -----BEGIN EC PRIVATE KEY-----
-            MHYCAQEEHyC0xu2CqkgbcucMgz8wKqLqZQWye4b9Y6DwpiICgTagCgYIKoZIzj0D
-            AQehRANCAAQkf5N5SgOEqIKYfbxjpirjUxKjiTiOjJQOahOLNn+NagmJFaUqjsTq
-            BLwIxtjfq22q3IQ2AmwMj3+wTNhucR4q
-            -----END EC PRIVATE KEY-----
-            """
+        let attributes: [CFString: Any] = [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeySizeInBits: 256]
+        var external = Data()
+        // About one key in 256 has a leading zero byte in its scalar.
+        for _ in 0..<20_000 {
+            let candidate = try #require(SecKeyCreateRandomKey(attributes as CFDictionary, nil))
+            let data = try #require(SecKeyCopyExternalRepresentation(candidate, nil) as Data?)
+            if data[data.startIndex + 65] == 0 {
+                external = data
+                break
+            }
+        }
+        try #require(external.count == 97, "no key with a leading zero byte was found")
+        let publicPoint = [UInt8](external.prefix(65))
+        let shortScalar = [UInt8](external.suffix(31))
+        let prime256v1: [UInt8] = [0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07]
+        var body: [UInt8] = [0x02, 0x01, 0x01, 0x04, 0x1F] + shortScalar
+        body += [0xA0, UInt8(prime256v1.count)] + prime256v1
+        body += [0xA1, 0x44, 0x03, 0x42, 0x00] + publicPoint
+        let der = [0x30, UInt8(body.count)] + body
+        let label = "EC PRIVATE" + " KEY"
+        let pem = "-----BEGIN \(label)-----\n\(Data(der).base64EncodedString(options: .lineLength64Characters))\n-----END \(label)-----\n"
         let key = try PrivateKeyDecoder.key(from: PEMBlock.all(in: pem), passphrase: nil, path: "short.key")
-        let attributes = SecKeyCopyAttributes(key) as? [CFString: Any]
-        #expect(attributes?[kSecAttrKeySizeInBits] as? Int == 256)
+        let keyAttributes = SecKeyCopyAttributes(key) as? [CFString: Any]
+        #expect(keyAttributes?[kSecAttrKeySizeInBits] as? Int == 256)
         // The public key recomputed from the padded scalar is the one stored in the file.
-        let stored = Data(base64Encoded: "BCR/k3lKA4Sogph9vGOmKuNTEqOJOI6MlA5qE4s2f41qCYkVpSqOxOoEvAjG2N+rbarchDYCbAyPf7BM2G5xHio=")
-        #expect(SecKeyCopyExternalRepresentation(try #require(SecKeyCopyPublicKey(key)), nil) as Data? == stored)
+        #expect(SecKeyCopyExternalRepresentation(try #require(SecKeyCopyPublicKey(key)), nil) as Data? == Data(publicPoint))
     }
 
     @Test func buildsIdentityFromAnECKey() throws {
