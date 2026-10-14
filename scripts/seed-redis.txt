@@ -1,0 +1,16 @@
+FLUSHALL
+SET greeting "Hello from Foxlume Query"
+SET counter 42
+SET session:abc123 "{\"user\":1,\"role\":\"admin\"}" EX 86400
+SET binary:blob "\x00\xff\x10"
+HSET user:1 name "Zoë Müller" email zoe.muller@example.com country DE visits 12
+HSET user:2 name "Björn Larsen" email bjorn.larsen@example.com country NO visits 3
+HSET user:3 name "Alice Martin" email alice@example.com country US visits 7
+RPUSH queue:emails welcome:1 reset:2 digest:3 welcome:4
+SADD tags:post:1 swift macos database redis
+ZADD leaderboard 1500 zoe 1320 bjorn 980 alice 2100 bob
+XADD events:orders * order 1001 status paid
+XADD events:orders * order 1002 status shipped
+SET cache:product:1 "Iced latte" PX 3600000
+SELECT 1
+SET other:db "value in db 1"

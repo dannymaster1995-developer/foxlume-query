@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache DuckDB download
+        uses: actions/cache@v4
+        with:
+          path: .build/duckdb-download
+          key: duckdb-${{ hashFiles('scripts/fetch-duckdb.sh') }}
+
+      - name: Fetch DuckDB
+        run: scripts/fetch-duckdb.sh
+
+      - name: Build
+        run: |
+          source scripts/env.sh
+          fqswift build
+
+      - name: Test
+        # Live database suites skip themselves: no servers run on the CI machine.
+        run: |
+          source scripts/env.sh
+          fqtest

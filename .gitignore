@@ -1,0 +1,12 @@
+# SwiftPM and app builds
+.build/
+build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+
+# DuckDB's prebuilt library is downloaded by scripts/fetch-duckdb.sh (about 55 MB), not committed.
+Vendor/duckdb/libduckdb.dylib
+
+# macOS
+.DS_Store
