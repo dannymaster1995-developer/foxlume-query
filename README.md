@@ -1,143 +1,138 @@
+<div align="center">
+
+<img src="docs/images/icon.png" width="128" height="128" alt="Foxlume Query app icon">
+
 # Foxlume Query
 
-A native macOS database client written in Swift with AppKit and SwiftUI. No Electron, no JVM, no drivers to install:
-every wire protocol is implemented in Swift inside the app.
+**A fast, native macOS database client for PostgreSQL and MySQL.**<br>
+Browse tables, write SQL with smart autocomplete, edit data safely and understand your queries, in an app built only with Swift and AppKit.
 
-> **Status: early alpha (0.1.0).** Foxlume Query is usable day to day, but it has not seen wide use yet. There are
-> no prebuilt downloads; build it from source as described below. Bug reports are very welcome.
+[![CI](https://github.com/dannymaster1995-developer/foxlume-query/actions/workflows/ci.yml/badge.svg)](https://github.com/dannymaster1995-developer/foxlume-query/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)
+![Swift](https://img.shields.io/badge/Swift-6-F05138.svg)
+![Status](https://img.shields.io/badge/status-alpha-orange.svg)
 
-## Databases
+[Features](#features) · [Databases](#supported-databases) · [Install](#install) · [Shortcuts](#keyboard-shortcuts) · [FAQ](#faq) · [Contributing](#contributing)
 
-PostgreSQL and MySQL are the focus of the first releases. The other engines work but are labelled **Beta** in the app:
-they have had less testing and some features are missing.
+<img src="docs/images/data-grid.png" alt="Foxlume Query showing a PostgreSQL table with multi-column sort and a cell selection summary" width="900">
 
-| Engine | Status | Tested with | How it connects |
-|---|---|---|---|
-| PostgreSQL | Supported | 18 | Protocol v3 in Swift: SCRAM-SHA-256, MD5, TLS |
-| MySQL | Supported | 8.4 | MySQL protocol in Swift: caching_sha2_password (fast path, RSA, TLS), mysql_native_password |
-| MariaDB | Beta | not yet tested | Same driver as MySQL |
-| SQLite | Beta | 3.51 (macOS) | The system `libsqlite3` |
-| DuckDB | Beta | 1.5.6 | DuckDB's C library; opens `.duckdb` files and Parquet, CSV, TSV and JSON files directly |
-| MongoDB | Beta | 8.2 | Wire protocol in Swift: SCRAM-SHA-1/256, TLS, `mongodb://` and `mongodb+srv://`; a JavaScriptCore shell runs MQL |
-| Redis | Beta | 8.x | RESP2/RESP3 in Swift: ACL, TLS, Sentinel and Cluster; keys shown as a tree |
+</div>
+
+## Why Foxlume Query?
+
+- **Native and light.** A real Mac app (AppKit, no Electron, no Java). It starts fast and stays responsive on tables with millions of rows.
+- **No drivers to install.** The PostgreSQL, MySQL, MongoDB and Redis protocols are built into the app in Swift.
+- **Safe by default.** Edits are staged until you save, saves run in a transaction, and each connection has a Safe Mode, from "ask before writing" to Touch ID or fully read-only.
+- **Free and open source** under the AGPL-3.0. Inspired by [TablePro](https://github.com/TableProApp/TablePro), and an open alternative to TablePlus, Sequel Ace and DBeaver for Mac users.
+
+> [!NOTE]
+> Foxlume Query is in **early alpha (0.1.0)**. There are no prebuilt downloads yet, so you [build it from source](#install) in a few minutes. Bug reports and ideas are very welcome.
 
 ## Features
 
-**Connections**
-- Saved connections with groups, colors and environment labels (Local, Development, Staging, Production).
-- Safe Mode per connection: Silent, Alert (confirm writes), Alert (Full) (confirm everything), Safe Mode and Safe Mode (Full) (confirm, then Touch ID or your password), or Read-Only.
-- TLS 1.2 and 1.3 with the modes Disabled, Preferred, Required, Verify CA and Verify Identity (libpq's verify-ca and verify-full). A custom CA certificate (PEM, bundles allowed) replaces the system roots in the verify modes, and a client certificate for mutual TLS comes from PEM files (RSA or EC key, encrypted keys included) or a PKCS#12 file (macOS 15 and later). Certificates and keys stay in memory, never in a keychain; the key passphrase is kept with the password. The form checks each file as you choose it, and TLS errors say what failed: unknown CA, host name mismatch, expired certificate, client certificate refused, wrong passphrase. PostgreSQL and MySQL; MongoDB and Redis in beta.
-- SSH tunnels through the system `ssh` (agent, key file or password).
-- Open a connection from a URL (`postgres://`, `mysql://`, `mongodb://`, `redis://` …), including `sslmode`, `sslrootcert`, `sslcert`, `sslkey` and `sslpassword` for PostgreSQL, `ssl-mode`, `ssl-ca`, `ssl-cert` and `ssl-key` for MySQL, and `tlsCAFile` and `tlsCertificateKeyFile` in MongoDB connection strings.
-- Passwords are kept in the macOS Keychain.
-- A periodic health check reconnects dropped connections in the background, and running something on a lost connection reconnects first.
+### Write SQL faster
 
-**Browsing and editing**
-- Sidebar of tables, views, collections or Redis keys, with a filter and a schema picker. Engine-internal databases are hidden by default.
-- Paged grids (5 to 1,000 rows per page, all rows, or a custom size) with server-side sorting and filters by column and operator or by raw WHERE / MongoDB filter / Redis pattern.
-- Multi-column sort: click a header to sort ascending, again for descending, a third time for no sort; Shift-click adds the column as the next key (numbered in the header). Table tabs sort on the server with one ORDER BY (a sort document on MongoDB); query results sort in memory. The header menu has Sort Ascending / Descending, Don't Sort, Select Column, Copy Column Name, Fill Column… and Filter with Column.
-- Filters with =, ≠, >, ≥, <, ≤, contains, starts / ends with, matches regex, between, not between, in / not in list, is empty / not empty and is (not) NULL. Text operators ignore case unless Match Case (Aa) is on; rules combine with Match All or Match Any. Save the filters of a table as a named preset and apply or delete it later. A cell's context menu offers Filter conditions built from its value.
-- Cell selection: click a cell, drag or Shift-click for a range, ⌘-click to add or remove cells, ⌘-click a header (or Select Column) for a whole column, Shift-arrows to extend. ⌘C copies the range as TSV (⌥⌘C with headers). ⌘V pastes TSV or CSV from the selected cell as staged edits (one undo step); a block as wide as the table is added as new rows. Fill Column… and Fill Selected Cells… set one value. The status bar shows count, sum, average, minimum and maximum of the selected cells.
-- In-place editing with undo and redo, including Set NULL, DEFAULT and Current Timestamp. Save runs every change in one transaction, checks that each change touched exactly one row, and rolls back otherwise. Preview SQL (⇧⌘P) shows exactly what Save will run.
-- Foreign key cells link to the referenced row; the Row Inspector (⌥⌘I) shows the selected row column by column with types.
-- Find in results (⌘F) highlights matches in the loaded rows; Search All Rows searches the whole table on the server.
-- MongoDB edits keep BSON types (Int64, Decimal128, ObjectId, dates), including nested values; fields can be removed.
-- Rename tables and views right away; Truncate and Drop are staged until Save, with "Ignore foreign key checks" and "Cascade" options.
-- Create and drop databases (PostgreSQL, MySQL) and schemas (PostgreSQL) from the Database menu.
-- Procedures, Functions, Triggers and Types groups in the sidebar (PostgreSQL; MySQL and MariaDB without Types; SQLite triggers; DuckDB macros as functions), with overloads shown with their arguments and each trigger with its table. Double-click opens the definition in a read-only tab with Copy, Save As and Edit in Query Tab (CREATE OR REPLACE on PostgreSQL, DROP + CREATE on MySQL, no DELIMITER needed); the context menu adds Copy Name, Copy Definition, New Trigger… and Drop… (asked first, Safe Mode applies, never on read-only connections). Open Quickly and the sidebar filter find them too.
-- Structure view with columns, indexes, foreign keys, check constraints, triggers and DDL. On PostgreSQL and MySQL it is an editor: add, change and drop columns (type, nullable, default, primary key, auto increment, comment), indexes, foreign keys and the table comment, preview the ALTER statements and save them. New Table builds a CREATE TABLE with a live SQL preview.
-- Copy rows as TSV, CSV, JSON, INSERT statements or Markdown, or export a result to a file.
+<img src="docs/images/autocomplete.png" alt="Context-aware SQL autocomplete suggesting the columns of a joined table" width="820">
 
-**Import and export** (SQL engines)
-- Export Tables (⌥⇧⌘E): one or more tables and views to CSV, JSON, NDJSON or a SQL dump (structure, data or both, optionally gzipped), with a filter and row limit per table. Rows are streamed from a consistent snapshot on a separate connection.
-- Import CSV into Table (⇧⌘I): encoding and delimiter detection, a preview, column mapping and NULL handling; on error, roll back, keep the rows so far, or skip bad rows and list them.
-- Run SQL File: `.sql` and `.sql.gz` files of any size, statement by statement, with the same error choices.
+- **Context-aware autocomplete.** It knows the clause you are in, the tables and aliases in scope, CTEs and subqueries. It suggests columns with their types and keys, functions with signatures, and keywords for your database's dialect.
+- **Saved queries.** Save a query with ⌘D, organise saved queries in folders, and give one a keyword to insert it while you type.
+- **Run what you need.** Run the statement under the cursor (⌘↩), everything (⇧⌘↩) or without the row limit (⌥⌘↩). Format SQL (⇧⌘L) and keep a searchable history.
+- **Open Quickly (⇧⌘O).** One fuzzy search across tables, views, functions, databases, saved queries and history.
 
-**Query editor**
-- Highlighting for SQL, MongoDB shell commands and Redis commands.
-- Context-aware completion: the SQL analyzer knows the clause, the tables and aliases in scope, CTEs and subqueries, and offers tables, columns (with type and key details), functions with signatures, keywords and operators for the connection's dialect, quoting names where needed. Keyword case follows a setting. MongoDB completion knows collections, methods, operators and sampled document fields; Redis completion knows commands, options and key names. The filter bar's raw SQL box completes too.
-- Run the statement under the caret (⌘↩), everything (⇧⌘↩) or without the row limit (⌥⌘↩); cancel with ⌘.; format SQL with ⇧⌘L. The row limit is applied by the server on PostgreSQL and MySQL, so large results never cross the network in full.
-- Explain (⌥⌘E) and Explain Analyze (⌃⌘E) for the statement under the caret or the selection: the plan as a tree with
-  each step's object, share of the work, cost, estimated and actual rows, time and loops, expensive steps marked,
-  warnings (row estimates far off, large filtered scans, sorts and hashes spilled to disk), every property of the
-  selected step, and the server's raw output. PostgreSQL and MySQL; SQLite, DuckDB, MariaDB and MongoDB in beta.
-  The Diagram mode (the default) draws the plan as a tree of boxes coloured by each step's share of the work, with
-  cost, estimated and actual rows and time; it zooms (pinch, ⌘-scroll, ⌘= / ⌘-, Fit), shares its selection with
-  the tree and the detail pane, and exports as PNG or copies as an image (⌘C).
-  Explain Analyze really runs the statement: on PostgreSQL inside a transaction that is rolled back, elsewhere only
-  for statements that read data, and never for writes on read-only connections.
-- Confirmation before UPDATE or DELETE without WHERE, and before writes on Production connections (both can be turned off in Settings).
-- Open and save `.sql` files.
-- Saved queries (⌘D, or the star in a query tab): a "Saved Queries" side of the sidebar with nested folders, kept for one connection or shared with all of them. Each can have a keyword: typing it in the editor offers the query, and `;;` in its SQL marks where the cursor lands. Saved queries never run on their own; Run goes through the normal run path, Safe Mode included.
+### Browse and edit data
 
-**ER diagrams**
-- Database › ER Diagram, the sidebar's ER Diagram, or Show in ER Diagram on a table opens the schema (MySQL: the
-  database) as an entity-relationship diagram in a tab: tables with their columns, primary and foreign key markers
-  and types (Types and Keys Only switches), foreign key lines from column to column with crow's foot cardinality, and
-  related tables tinted and laid out together. PostgreSQL and MySQL read a whole schema in three catalog queries;
-  SQLite and DuckDB load table by table with progress.
-- Drag tables to arrange them (positions are remembered per connection and schema; Reset Layout forgets them), zoom
-  and pan as in the plan diagram, Find Table highlights matches, double-click opens a table's data, and the diagram
-  exports as PNG or PDF or copies as an image.
+- **A fast grid** with server-side paging, sorting on several columns (Shift-click) and filters: between, regex, IN, match case, and saved presets.
+- **Spreadsheet-style editing:** select ranges, copy as TSV, paste from Excel or CSV, fill a column, see sum and average of the selection. Every change waits for ⌘S, and Preview SQL (⇧⌘P) shows exactly what will run.
+- **Follow foreign keys** with one click, inspect a row in the Row Inspector (⌥⌘I), and find text in results or across the whole table.
 
-**Everything else**
-- System, Light or Dark appearance; 13 built-in editor themes (Dracula, One Dark, Nord, Solarized, Catppuccin …) and import of VS Code themes (`.json` or `.vsix`).
-- Searchable query history (SQLite full-text search); any entry can be kept as a saved query.
-- Open Quickly (⇧⌘O): one fuzzy search over tables and views (all schemas), databases, schemas, procedures, functions, triggers and types, saved queries and recent history, with the tables, saved queries and history of the other open connections. Results rank by match and by how often and recently you opened them.
-- Open tabs come back when you reopen a connection; ⇧⌘T reopens a closed tab.
+### Understand your queries
 
-**Not there yet:** SQL Server and many other engines, plan comparison, JSON and XLSX import. MongoDB X.509 authentication, certificate revocation checks and SCRAM channel binding are not supported yet.
+<img src="docs/images/explain-diagram.png" alt="Explain Analyze plan shown as a diagram with the slowest step highlighted" width="820">
 
-## Building from source
+- **Explain (⌥⌘E) and Explain Analyze (⌃⌘E)** draw the query plan as a diagram or a tree. Slow steps are highlighted, and warnings such as large scans or wrong row estimates are shown with each step.
+- Explain Analyze on PostgreSQL runs inside a transaction that is rolled back, so even an `UPDATE` changes nothing.
 
-Requirements: macOS 13 or later on Apple silicon, and Swift 6 from either Xcode or the Command Line Tools
-(`xcode-select --install`).
+### Design your schema
+
+<img src="docs/images/er-diagram-dark.png" alt="Entity-relationship diagram of the Chinook sample database" width="820">
+
+- **ER diagrams** of a whole schema, with crow's-foot relationships, drag-to-arrange layouts that are remembered, and PNG or PDF export.
+- **A structure editor** for PostgreSQL and MySQL: add or change columns, indexes, foreign keys and comments, review the generated `ALTER` statements, then save. **New Table** builds a `CREATE TABLE` with a live preview.
+- **Functions, procedures, triggers and types** in the sidebar, with their source and "Edit in Query Tab".
+
+### Import and export
+
+- **Export Tables** to CSV, JSON, NDJSON or a SQL dump (structure, data or both, optionally gzipped), streamed from a consistent snapshot.
+- **Import CSV** with encoding and delimiter detection, column mapping and a choice of what to do with bad rows.
+- **Run SQL files** (`.sql`, `.sql.gz`) of any size.
+
+### Connect securely
+
+- **TLS 1.3**, with Verify CA / Verify Identity modes, a custom CA and client certificates (PEM or PKCS#12).
+- **SSH tunnels**, connection URLs (`postgres://`, `mysql://`…) and passwords kept in the macOS Keychain.
+- **Safe Mode** per connection: Silent, Alert, Safe Mode with Touch ID, or Read-Only. Production connections are clearly labelled.
+
+<details>
+<summary><b>More screenshots</b></summary>
+<br>
+
+| Open Quickly | Structure editor |
+|---|---|
+| <img src="docs/images/open-quickly.png" alt="Open Quickly fuzzy search over tables and history" width="420"> | <img src="docs/images/structure-editor.png" alt="Structure editor for a PostgreSQL table" width="420"> |
+
+| ER diagram (light) | |
+|---|---|
+| <img src="docs/images/er-diagram-light.png" alt="ER diagram in light appearance" width="420"> | |
+
+</details>
+
+## Supported databases
+
+| Database | Status | Notes |
+|---|---|---|
+| **PostgreSQL** | ✅ Supported | Tested with 18; SCRAM-SHA-256, MD5, TLS 1.3 |
+| **MySQL** | ✅ Supported | Tested with 8.4; caching_sha2_password, TLS 1.3 |
+| MariaDB | 🧪 Beta | Uses the MySQL driver |
+| SQLite | 🧪 Beta | Uses the system SQLite |
+| DuckDB | 🧪 Beta | Opens `.duckdb`, Parquet, CSV and JSON files |
+| MongoDB | 🧪 Beta | `mongodb://` and `mongodb+srv://`, MQL shell |
+| Redis | 🧪 Beta | ACL, TLS, Sentinel and Cluster; keys as a tree |
+
+PostgreSQL and MySQL are the focus of the first releases. Beta engines work, but they have had less testing and some features are missing.
+
+## Install
+
+**Requirements:** macOS 13 or later on Apple silicon, and Swift 6 (Xcode, or just the Command Line Tools: `xcode-select --install`).
 
 ```bash
 git clone https://github.com/dannymaster1995-developer/foxlume-query.git
 cd foxlume-query
-scripts/fetch-duckdb.sh            # downloads DuckDB's official library (about 55 MB) into Vendor/duckdb
-scripts/build-app.sh               # builds "build/Foxlume Query.app" (release, ad-hoc signed)
+scripts/build-app.sh            # builds "build/Foxlume Query.app" (downloads DuckDB on first run)
 open "build/Foxlume Query.app"
 ```
 
-`scripts/env.sh` defines `fqswift` and `fqtest`, wrappers around `swift` that keep every compiler and SwiftPM cache
-inside the repository's `.build` folder:
+The app is signed ad hoc. After a rebuild, macOS may ask again for Keychain access; choose **Always Allow**.
 
-```bash
-source scripts/env.sh
-fqswift build                      # debug build of the app, the core library and the fqprobe CLI
-fqtest                             # the test suite; tests that need a live database skip when it is not running
-```
-
-The app is signed ad hoc, so macOS may ask again for Keychain access after each rebuild; choose "Always Allow".
-
-### Live database tests
-
-Tests for PostgreSQL (port 55432), MySQL (53306), MongoDB (57017) and Redis (56379) run when a server answers on that
-port on 127.0.0.1 and skip otherwise. The credentials they use are local test values (see `scripts/dbtest.sh` and the
-`scripts/seed-*` files); never point the tests at a real server. Sample data for each engine is in `scripts/`.
-
-### Command-line probe
-
-`fqprobe` exercises a driver without the app:
-
-```bash
-.build/debug/fqprobe --kind postgresql --port 55432 --user postgres --password postgres --db foxlume query "SELECT now()"
-.build/debug/fqprobe --kind mysql --port 53306 --user root --password root --db foxlume meta orders
-```
-
-## Where data is stored
-
-| Data | Location |
-|---|---|
-| Connections, settings, history, saved queries, filter presets, ER diagram layouts, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
-| Database and SSH passwords, TLS key passphrases | macOS Keychain, service `com.foxlume.query.connection` |
-
-Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder
-(passwords in a file readable only by you). `scripts/run-portable.sh` starts the app this way.
+Developing on Foxlume Query? See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the test suite, local test servers and project layout.
 
 ## Keyboard shortcuts
+
+The most used ones:
+
+| Keys | Action |
+|---|---|
+| ⌘↩ / ⇧⌘↩ | Run statement / run all |
+| ⇧⌘O | Open Quickly |
+| ⌃Space | Show completions |
+| ⌥⌘E / ⌃⌘E | Explain / Explain Analyze |
+| ⌘S / ⇧⌘P | Save changes / preview their SQL |
+| ⇧⌘L | Format SQL |
+| ⌘D | Save the query |
+
+<details>
+<summary><b>All shortcuts</b></summary>
+<br>
 
 | Keys | Action |
 |---|---|
@@ -148,8 +143,9 @@ Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords inc
 | ⌘. | Cancel query |
 | ⇧⌘L | Format SQL |
 | ⌥⌘E / ⌃⌘E | Explain / Explain Analyze |
-| ⌘= / ⌘- / ⌘C | Zoom in / zoom out / copy as image, in a focused plan or ER diagram |
 | ⌃Space | Show completions |
+| ⌘D | Add the query (or the selection) to Saved Queries |
+| ⇧⌘O | Open Quickly (⌘1 … ⌘5 pick its scope, ⌘↩ opens in a new tab) |
 | ⌘S | Save (staged truncates and drops, grid edits, or the SQL file) |
 | ⇧⌘P | Preview SQL |
 | ⇧⌘N / ⇧⌘D / ⌘⌫ | Add / duplicate / delete rows |
@@ -163,8 +159,6 @@ Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords inc
 | ⌘K | Switch database |
 | ⌥⌘1 / ⌥⌘2 | Data / Structure |
 | ⌘Y | Query history |
-| ⇧⌘O | Open Quickly (⌘1 … ⌘5 pick its scope, ⌘↩ opens in a new tab) |
-| ⌘D | Add the query (or the selection) to Saved Queries |
 | ⌃⌥⌘F | Focus the sidebar filter |
 | ⌘0 | Toggle sidebar |
 | ⌘/ | Toggle comment |
@@ -173,44 +167,44 @@ Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords inc
 | Shift-click a header | Add a column to the sort |
 | ⇧ arrows / ⇧⌘ arrows | Extend the cell selection by one cell / to the edge |
 | ⇧Space / Esc | Widen the cell selection to whole rows / end it |
+| ⌘= / ⌘- / ⌘C | Zoom in / zoom out / copy as image, in a plan or ER diagram |
 | ⇧⌘E / ⌥⇧⌘E | Export results / export tables |
 | ⇧⌘I | Import CSV into a table |
 
-## Project layout
+</details>
 
-```
-Sources/
-  CDuckDB/              DuckDB C API module (library in Vendor/duckdb)
-  FoxlumeQueryCore/     UI-independent library
-    Models/             connection settings, results, schema types
-    Drivers/            DatabaseConnection protocol, DatabaseSession (serial queue, ping, reconnect)
-      Transport/        TCP sockets with in-place TLS upgrade, SSH tunnel, connect deadlines
-      TLS/              Network.framework TLS stream, PEM / key decoding, client identities, certificate checks
-      Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/
-    SQL/                dialects, statement splitting, query languages, table queries, change generation, formatter
-    Completion/         query editor completion engines
-    Storage/            connections, Keychain, history, saved queries, filter presets, ER diagram layouts, settings
-    Grid/               sort cycle and in-memory sort, paste parsing and placement, selection figures, cell filters
-    Search/             Open Quickly matching, ranking and recency
-    Explain/            query plan model, parsers per engine, analysis, the Explain runner and the plan diagram layout
-    Diagram/            ER diagram graph (relationships, cardinality, groups) and layout
-    Theme/              built-in themes, VS Code theme import
-    Export/             result export, table export and SQL dumps
-    Import/             CSV import, SQL file runner, text decoding
-  FoxlumeQuery/         the AppKit app
-  fqprobe/              driver probe CLI
-Tests/FoxlumeQueryCoreTests/   Swift Testing suites for the core library
-Tests/FoxlumeQueryAppTests/    editor, filter bar, workspace, saved query, Open Quickly and grid selection / paste checks against the real AppKit classes
-scripts/                build, environment, test servers (dbtest-tls.sh: TLS scratch servers), test certificates, sample data
-```
+## FAQ
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to work on the code and [SECURITY.md](SECURITY.md) for reporting
-security issues.
+<details>
+<summary><b>Is there a download?</b></summary>
+
+Not yet. Foxlume Query is in alpha, so you build it from source with the commands in [Install](#install). It takes a few minutes and needs no Apple developer account.
+</details>
+
+<details>
+<summary><b>Where are my connections and passwords stored?</b></summary>
+
+Connections, settings, history and saved queries are in `~/Library/Application Support/Foxlume Query/`. Passwords and TLS key passphrases are in the macOS Keychain. For a portable setup, set `FOXLUME_DATA_DIR=/some/folder` (or use `scripts/run-portable.sh`), and everything, passwords included, is kept in that folder.
+</details>
+
+<details>
+<summary><b>Can I use it with my production database?</b></summary>
+
+Yes, carefully: it is alpha software. Give the connection a Production label and a Safe Mode (Alert, Safe Mode with Touch ID, or Read-Only), so every write asks first or is refused.
+</details>
+
+<details>
+<summary><b>What is not there yet?</b></summary>
+
+SQL Server and other engines, plan comparison, JSON and XLSX import, MongoDB X.509 authentication and certificate revocation checks. See the [CHANGELOG](CHANGELOG.md) for what is new.
+</details>
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). To report a security issue, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Foxlume Query is free software under the GNU Affero General Public License v3.0 or later; see [LICENSE](LICENSE).
-It includes DuckDB (MIT License); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Foxlume Query is free software under the [GNU Affero General Public License v3.0 or later](LICENSE). It includes DuckDB (MIT License); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Its features and interface are inspired by [TablePro](https://github.com/TableProApp/TablePro). Foxlume Query is an
-independent project and is not affiliated with TablePro.
+Its features and interface are inspired by [TablePro](https://github.com/TableProApp/TablePro). Foxlume Query is an independent project and is not affiliated with TablePro.
