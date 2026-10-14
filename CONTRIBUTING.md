@@ -35,7 +35,9 @@ Thanks for helping. Bug reports, fixes and new features are all welcome.
 - Every change that can be tested has a test. When a test fails, fix the code, not the test.
 - Tests must not write outside `TMPDIR` (use `Tests/FoxlumeQueryCoreTests/TestFiles.swift`), because
   `FileManager.temporaryDirectory` ignores `TMPDIR` on macOS.
-- Live tests use local servers with test credentials only (`scripts/dbtest.sh` documents the ports and users).
+- Live tests use local servers with test credentials only (`scripts/dbtest.sh` documents the ports and users;
+  `scripts/dbtest-tls.sh` starts separate PostgreSQL and MySQL servers for the TLS certificate tests, with
+  certificates from `scripts/tls-test-certs.sh`).
 - UI changes can be checked with the scripted runner in `Sources/FoxlumeQuery/App/AutoTestRunner.swift` (debug builds
   only): set `FOXLUME_AUTOTEST_FILE` to a script of commands and `FOXLUME_DATA_DIR` to a scratch folder.
 

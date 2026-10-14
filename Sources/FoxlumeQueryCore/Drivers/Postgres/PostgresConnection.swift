@@ -1,7 +1,7 @@
 import Foundation
 
 /// PostgreSQL over the frontend/backend protocol 3.0: simple query protocol, text-format results.
-public final class PostgresConnection: DatabaseConnection {
+public final class PostgresConnection: DatabaseConnection, TLSReporting {
     public var kind: DatabaseKind { parameters.config.kind }
     public private(set) var serverVersion: String = ""
     public private(set) var currentDatabase: String?
@@ -13,6 +13,7 @@ public final class PostgresConnection: DatabaseConnection {
     /// `server_version_num`, for example `180000`. Valid after `connect()`.
     public private(set) var serverVersionNumber: Int = 0
     public var isTLS: Bool { transport?.isTLS ?? false }
+    public var tlsProtocolVersion: String? { transport?.tlsProtocolVersion }
 
     private let parameters: ConnectionParameters
     private var transport: SocketTransport?
@@ -52,7 +53,8 @@ public final class PostgresConnection: DatabaseConnection {
         let deadline = ConnectDeadline(timeout: timeout)
         let timedOut = DatabaseError.connection("Timed out after \(Int(timeout)) seconds waiting for PostgreSQL at \(parameters.config.host):\(parameters.config.port). Is this a PostgreSQL server?")
         do {
-            let transport = try openTransport(deadline: deadline)
+            let tls = try TLSContext.load(parameters)
+            let transport = try openTransport(deadline: deadline, tls: tls)
             self.transport = transport
             let config = parameters.config
             let startup = PostgresFrontend.startup(parameters: [
@@ -63,12 +65,13 @@ public final class PostgresConnection: DatabaseConnection {
                 ("DateStyle", "ISO, MDY"),
             ])
             do {
-                // The TLS handshake runs on this first write, so certificate problems surface here.
+                // The TLS handshake finishes before this first write, so certificate problems surface here; with
+                // TLS 1.3 a refused client certificate shows up on the first read, inside `authenticate`.
                 try transport.write(startup)
-            } catch DatabaseError.connection(let reason) where transport.isTLS {
-                throw tlsHandshakeError(reason)
+                try authenticate(transport)
+            } catch {
+                throw Self.explainCertificateError(transport.tlsHandshakeError(error, endpoint: config.host), tls: tls)
             }
-            try authenticate(transport)
             try readUntilReady(transport)
             try loadSessionInfo()
             if deadline.finish() { throw timedOut }
@@ -107,7 +110,7 @@ public final class PostgresConnection: DatabaseConnection {
     }
 
     /// TCP connect, then the SSLRequest exchange when the SSL mode asks for TLS.
-    private func openTransport(deadline: ConnectDeadline) throws -> SocketTransport {
+    private func openTransport(deadline: ConnectDeadline, tls: TLSContext) throws -> SocketTransport {
         let sslMode = parameters.config.sslMode
         let transport = try makeSocket(deadline: deadline)
         guard sslMode.wantsTLS else { return transport }
@@ -116,7 +119,7 @@ public final class PostgresConnection: DatabaseConnection {
             let answer = try transport.readByte()
             switch answer {
             case UInt8(ascii: "S"):
-                try transport.startTLS(host: parameters.config.host, verifyCertificate: sslMode.verifiesCertificate)
+                try transport.startTLS(tls.options(host: parameters.config.host))
                 return transport
             case UInt8(ascii: "N"):
                 guard !sslMode.requiresTLS else {
@@ -138,18 +141,6 @@ public final class PostgresConnection: DatabaseConnection {
             transport.close()
             throw error
         }
-    }
-
-    private func tlsHandshakeError(_ reason: String) -> DatabaseError {
-        let config = parameters.config
-        guard config.sslMode.verifiesCertificate else {
-            return .connection("TLS handshake with \(config.host) failed. \(reason)")
-        }
-        return .connection("""
-            TLS handshake with \(config.host) failed: the server certificate could not be verified. \
-            It must be signed by a trusted authority and match the host name; use SSL mode \
-            "\(SSLMode.require.displayName)" to encrypt without verifying. \(reason)
-            """)
     }
 
     private func authenticate(_ transport: SocketTransport) throws {
@@ -260,6 +251,18 @@ public final class PostgresConnection: DatabaseConnection {
     }
 
     /// SQLSTATE class 28 is "invalid authorization specification": wrong password, no pg_hba entry, and so on.
+    /// pg_hba `cert` (or `clientcert=…`) refusals, with what to change in the connection.
+    static func explainCertificateError(_ error: Error, tls: TLSContext) -> Error {
+        guard case DatabaseError.authentication(let message)? = error as? DatabaseError else { return error }
+        if tls.identity == nil, message.contains("client certificate") {
+            return DatabaseError.authentication("\(message). Choose a client certificate and key in the connection's SSL/TLS settings.")
+        }
+        if let identity = tls.identity, message.contains("certificate authentication failed") {
+            return DatabaseError.authentication("\(message). The client certificate \"\(identity.subjectSummary)\" was accepted, but its common name (CN) must match the user name (or the server's pg_ident.conf map).")
+        }
+        return error
+    }
+
     private static func startupError(_ error: PostgresServerError) -> DatabaseError {
         if error.code?.hasPrefix("28") == true {
             return .authentication(error.message)

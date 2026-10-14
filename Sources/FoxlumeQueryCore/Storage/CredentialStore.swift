@@ -16,6 +16,11 @@ public extension CredentialStore {
     func sshSecret(for connectionID: UUID) -> String? { secret(account: connectionID.uuidString + ".ssh") }
     func setSSHSecret(_ secret: String, for connectionID: UUID) throws { try setSecret(secret, account: connectionID.uuidString + ".ssh") }
     func deleteSSHSecret(for connectionID: UUID) { deleteSecret(account: connectionID.uuidString + ".ssh") }
+
+    /// Passphrase of a connection's TLS client key, or its PKCS#12 password.
+    func tlsSecret(for connectionID: UUID) -> String? { secret(account: connectionID.uuidString + ".tls") }
+    func setTLSSecret(_ secret: String, for connectionID: UUID) throws { try setSecret(secret, account: connectionID.uuidString + ".tls") }
+    func deleteTLSSecret(for connectionID: UUID) { deleteSecret(account: connectionID.uuidString + ".tls") }
 }
 
 public enum CredentialStores {

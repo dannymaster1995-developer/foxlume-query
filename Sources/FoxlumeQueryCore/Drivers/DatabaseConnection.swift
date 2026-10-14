@@ -35,6 +35,12 @@ public enum DatabaseError: Error, LocalizedError, Sendable {
     }
 }
 
+/// Implemented by drivers that can run over TLS.
+public protocol TLSReporting: AnyObject {
+    /// The negotiated TLS version ("TLS 1.3") while the session is encrypted, nil otherwise.
+    var tlsProtocolVersion: String? { get }
+}
+
 /// A single open database session.
 ///
 /// Every method except `cancel()` is called on one serial queue owned by `DatabaseSession`,

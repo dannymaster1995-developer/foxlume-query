@@ -35,6 +35,9 @@ public final class DatabaseSession: @unchecked Sendable {
 
     public var serverVersion: String { withState { _serverVersion } }
 
+    /// "TLS 1.3" when the current connection is encrypted (and the driver can tell), nil otherwise.
+    public var tlsProtocolVersion: String? { (currentConnection as? TLSReporting)?.tlsProtocolVersion }
+
     private func withState<T>(_ body: () throws -> T) rethrows -> T {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -122,7 +125,10 @@ public final class DatabaseSession: @unchecked Sendable {
         var forwarded = config
         forwarded.host = "127.0.0.1"
         forwarded.port = localPort
-        let replacement = ConnectionFactory.make(ConnectionParameters(config: forwarded, password: parameters.password))
+        var forwardedParameters = ConnectionParameters(config: forwarded, password: parameters.password, tlsSecret: parameters.tlsSecret)
+        // TLS still names and checks the real server, not the tunnel's local end.
+        forwardedParameters.tlsServerName = parameters.tlsServerName ?? config.host
+        let replacement = ConnectionFactory.make(forwardedParameters)
         withState { connection = replacement }
         self.tunnel = tunnel
     }

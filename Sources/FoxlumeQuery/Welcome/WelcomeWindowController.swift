@@ -52,6 +52,9 @@ final class WelcomeModel: ObservableObject {
         if let secret = AppEnvironment.credentials.sshSecret(for: config.id) {
             try? AppEnvironment.credentials.setSSHSecret(secret, for: copy.id)
         }
+        if let secret = AppEnvironment.credentials.tlsSecret(for: config.id) {
+            try? AppEnvironment.credentials.setTLSSecret(secret, for: copy.id)
+        }
         selection = copy.id
     }
 
@@ -59,6 +62,7 @@ final class WelcomeModel: ObservableObject {
         try? AppEnvironment.connections.delete(id: config.id)
         AppEnvironment.credentials.deletePassword(for: config.id)
         AppEnvironment.credentials.deleteSSHSecret(for: config.id)
+        AppEnvironment.credentials.deleteTLSSecret(for: config.id)
         // Queries saved for this connection only go with it, as in TablePro; shared ones stay.
         try? AppEnvironment.savedQueries.removeConnection(config.id)
         AppEnvironment.openQuicklyFrecency.removeConnection(config.id)

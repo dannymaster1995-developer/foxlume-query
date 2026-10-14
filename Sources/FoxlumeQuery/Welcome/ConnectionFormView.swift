@@ -14,16 +14,26 @@ final class ConnectionFormModel: ObservableObject {
     @Published var config: ConnectionConfig
     @Published var password: String
     @Published var sshSecret: String
+    /// Client key passphrase or PKCS#12 password.
+    @Published var tlsSecret: String
+    /// The client certificate comes as a PKCS#12 file rather than PEM certificate and key files.
+    @Published var usesPKCS12: Bool
     @Published var testState: TestState = .idle
+    /// Set by the scripted UI checks to scroll the form to a section ("tls").
+    @Published var scrollTarget: String?
     let isNew: Bool
+    /// Last file check, so the form does not reread the files on every redraw.
+    var tlsCheckCache: (key: String, result: TLSFileCheck)?
 
-    var onSave: ((ConnectionConfig, _ password: String, _ sshSecret: String, _ connect: Bool) -> Void)?
+    var onSave: ((ConnectionConfig, _ password: String, _ sshSecret: String, _ tlsSecret: String, _ connect: Bool) -> Void)?
     var onCancel: (() -> Void)?
 
-    init(config: ConnectionConfig?, password: String, sshSecret: String = "") {
+    init(config: ConnectionConfig?, password: String, sshSecret: String = "", tlsSecret: String = "") {
         self.config = config ?? ConnectionConfig(kind: .postgresql)
         self.password = password
         self.sshSecret = sshSecret
+        self.tlsSecret = tlsSecret
+        self.usesPKCS12 = !(config?.certificates.pkcs12Path.isEmpty ?? true)
         self.isNew = config == nil
     }
 
@@ -67,19 +77,24 @@ final class ConnectionFormModel: ObservableObject {
             if ssh.host.trimmingCharacters(in: .whitespaces).isEmpty { return "Enter the SSH host." }
             if ssh.authMethod == .keyFile, ssh.keyPath.trimmingCharacters(in: .whitespaces).isEmpty { return "Choose an SSH private key." }
         }
+        if let message = tlsValidationMessage { return message }
         return nil
     }
 
     func test() {
         testState = .testing
-        let parameters = ConnectionParameters(config: config, password: password, sshSecret: sshSecret)
+        let parameters = ConnectionParameters(config: config, password: password, sshSecret: sshSecret, tlsSecret: tlsSecret.isEmpty ? nil : tlsSecret)
         Task {
             let session = DatabaseSession(parameters: parameters)
             let started = Date()
             do {
                 try await session.connect()
                 let elapsed = Date().timeIntervalSince(started)
-                testState = .success("Connected to \(config.kind.displayName) \(session.serverVersion) in \(elapsed.durationText)")
+                var security = ""
+                if let version = session.tlsProtocolVersion {
+                    security = " over \(version)" + (config.sslMode.wantsTLS && config.certificates.hasClientCertificate ? " with a client certificate" : "")
+                }
+                testState = .success("Connected to \(config.kind.displayName) \(session.serverVersion) in \(elapsed.durationText)\(security)")
             } catch {
                 testState = .failure(error.localizedDescription)
             }
@@ -167,13 +182,11 @@ struct ConnectionFormView: View {
                             TextField("Database", text: $model.config.database, prompt: Text(databasePrompt))
                                 .accessibilityIdentifier("connectionDatabase")
                         }
-                        Picker("SSL", selection: $model.config.sslMode) {
-                            ForEach(SSLMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
                         Stepper("Connect timeout: \(model.config.connectTimeout) s", value: $model.config.connectTimeout, in: 2...120)
                     }
+
+                    ConnectionTLSSection(model: model)
+                        .id("tls")
 
                     if model.config.kind == .mongodb {
                         mongoSection
@@ -247,9 +260,11 @@ struct ConnectionFormView: View {
                     Section {
                         testResult
                     }
+                    .id("result")
                 }
             }
             .formStyle(.grouped)
+            .modifier(FormScroller(target: $model.scrollTarget))
 
             Divider()
             HStack {
@@ -270,10 +285,10 @@ struct ConnectionFormView: View {
                 Spacer()
                 Button("Cancel") { model.onCancel?() }
                     .keyboardShortcut(.cancelAction)
-                Button("Save") { model.onSave?(model.config, model.password, model.sshSecret, false) }
+                Button("Save") { model.onSave?(model.config, model.password, model.sshSecret, model.tlsSecret, false) }
                     .disabled(model.validationMessage != nil)
                     .accessibilityIdentifier("saveConnection")
-                Button("Connect") { model.onSave?(model.config, model.password, model.sshSecret, true) }
+                Button("Connect") { model.onSave?(model.config, model.password, model.sshSecret, model.tlsSecret, true) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.validationMessage != nil)
                     .accessibilityIdentifier("saveAndConnect")
@@ -408,7 +423,8 @@ final class ConnectionFormController: NSObject {
     init(config: ConnectionConfig?, parent: NSWindow?, onComplete: @escaping (ConnectionConfig, _ connect: Bool) -> Void) {
         let password = config.flatMap { AppEnvironment.credentials.password(for: $0.id) } ?? ""
         let sshSecret = config.flatMap { AppEnvironment.credentials.sshSecret(for: $0.id) } ?? ""
-        model = ConnectionFormModel(config: config, password: password, sshSecret: sshSecret)
+        let tlsSecret = config.flatMap { AppEnvironment.credentials.tlsSecret(for: $0.id) } ?? ""
+        model = ConnectionFormModel(config: config, password: password, sshSecret: sshSecret, tlsSecret: tlsSecret)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 600), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = config == nil ? "New Connection" : "Edit Connection"
         window.isRestorable = false
@@ -417,7 +433,7 @@ final class ConnectionFormController: NSObject {
         super.init()
         window.contentViewController = NSHostingController(rootView: ConnectionFormView(model: model))
         model.onCancel = { [weak self] in self?.dismiss() }
-        model.onSave = { [weak self] config, password, sshSecret, connect in
+        model.onSave = { [weak self] config, password, sshSecret, tlsSecret, connect in
             guard let self else { return }
             var config = config
             var password = password
@@ -436,6 +452,11 @@ final class ConnectionFormController: NSObject {
                 } else {
                     AppEnvironment.credentials.deleteSSHSecret(for: config.id)
                 }
+                if !config.kind.isFileBased, config.certificates.needsSecret, !tlsSecret.isEmpty {
+                    try AppEnvironment.credentials.setTLSSecret(tlsSecret, for: config.id)
+                } else {
+                    AppEnvironment.credentials.deleteTLSSecret(for: config.id)
+                }
                 self.dismiss()
                 onComplete(config, connect)
             } catch {
@@ -446,8 +467,12 @@ final class ConnectionFormController: NSObject {
 
     var formModel: ConnectionFormModel { model }
 
+    /// The form on screen, for the scripted UI checks.
+    private(set) static weak var presented: ConnectionFormController?
+
     func present() {
         retainSelf = self
+        Self.presented = self
         if let parent, parent.isVisible {
             parent.beginSheet(window)
         } else {
@@ -455,6 +480,9 @@ final class ConnectionFormController: NSObject {
             window.makeKeyAndOrderFront(nil)
         }
     }
+
+    /// The form's window, for the scripted UI checks.
+    var formWindow: NSWindow { window }
 
     func dismiss() {
         if let parent = window.sheetParent {

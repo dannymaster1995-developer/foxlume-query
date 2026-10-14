@@ -10,7 +10,7 @@ import Foundation
 ///   fqprobe --kind sqlite --file /path/db.sqlite query "..."
 
 func usage() -> Never {
-    FileHandle.standardError.write(Data("usage: fqprobe --kind postgresql|mysql|mariadb|sqlite|duckdb|mongodb|redis [--host H] [--port P] [--user U] [--password PW] [--db DB] [--ssl disable|prefer|require|verifyFull] [--file PATH] [--readonly 1] [--limit N] [--opt-<ConnectionOption> VALUE] [--ssh-host H --ssh-port P --ssh-user U --ssh-auth agent|keyFile|password --ssh-key PATH --ssh-secret S] (query SQL | meta [TABLE] | cancel)\n".utf8))
+    FileHandle.standardError.write(Data("usage: fqprobe --kind postgresql|mysql|mariadb|sqlite|duckdb|mongodb|redis [--host H] [--port P] [--user U] [--password PW] [--db DB] [--ssl disable|prefer|require|verifyCA|verifyFull] [--ssl-ca PATH] [--ssl-cert PATH] [--ssl-key PATH] [--ssl-p12 PATH] [--ssl-secret S] [--file PATH] [--readonly 1] [--limit N] [--opt-<ConnectionOption> VALUE] [--ssh-host H --ssh-port P --ssh-user U --ssh-auth agent|keyFile|password --ssh-key PATH --ssh-secret S] (query SQL | meta [TABLE] | cancel)\n".utf8))
     exit(64)
 }
 
@@ -45,11 +45,17 @@ var config = ConnectionConfig(
         )
     }
 )
+config.certificates = TLSCertificateFiles(
+    caCertificatePath: options["ssl-ca"] ?? "",
+    clientCertificatePath: options["ssl-cert"] ?? "",
+    clientKeyPath: options["ssl-key"] ?? "",
+    pkcs12Path: options["ssl-p12"] ?? ""
+)
 // `--opt-redisMode cluster` style flags set engine options (`ConnectionOption` raw values).
 for (key, value) in options where key.hasPrefix("opt-") {
     if let option = ConnectionOption(rawValue: String(key.dropFirst(4))) { config.setOption(option, value) }
 }
-let session = DatabaseSession(parameters: ConnectionParameters(config: config, password: options["password"] ?? "", sshSecret: options["ssh-secret"]))
+let session = DatabaseSession(parameters: ConnectionParameters(config: config, password: options["password"] ?? "", sshSecret: options["ssh-secret"], tlsSecret: options["ssl-secret"]))
 let rowLimit = options["limit"].flatMap(Int.init)
 
 func render(_ result: StatementResult) {

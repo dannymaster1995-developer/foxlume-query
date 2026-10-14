@@ -7,6 +7,8 @@ struct MongoSettings: Sendable {
     var useTLS: Bool
     var requireTLS: Bool
     var verifyCertificate: Bool
+    /// Certificates and the verification mode for TLS links (from the saved settings and the URI's tls* options).
+    var tls: TLSContext = TLSContext(mode: .disable)
     var database: String?
     var replicaSet: String?
     /// mongosh spelling, for example `secondaryPreferred`. Nil means primary.
@@ -35,6 +37,9 @@ struct MongoSettings: Sendable {
         var verify = config.sslMode.verifiesCertificate
         var explicitTLS: Bool?
         var directConnection: Bool?
+        var tlsFiles = config.certificates
+        var tlsSecret = parameters.tlsSecret
+        var checksHostname = config.sslMode.verifiesHostname
 
         // A URI pasted into the host field works like the connection string option.
         let hostURI = ["mongodb://", "mongodb+srv://"].contains { config.host.lowercased().hasPrefix($0) } ? config.host : nil
@@ -61,6 +66,15 @@ struct MongoSettings: Sendable {
             } else if uri.tlsInsecure {
                 verify = false
             }
+            if let path = uri.option("tlsCAFile") { tlsFiles.caCertificatePath = path }
+            if let path = uri.option("tlsCertificateKeyFile") {
+                // One PEM with the certificate and its key, as mongosh takes it.
+                tlsFiles.clientCertificatePath = path
+                tlsFiles.clientKeyPath = ""
+                tlsFiles.pkcs12Path = ""
+            }
+            if let password = uri.option("tlsCertificateKeyFilePassword") { tlsSecret = password }
+            if uri.flag("tlsAllowInvalidHostnames") == true { checksHostname = false }
         }
 
         if isSRV {
@@ -107,12 +121,16 @@ struct MongoSettings: Sendable {
             writeConcern = Int32(text).map { .int32($0) } ?? .string(text)
         }
 
+        let tlsMode: SSLMode = !useTLS ? .disable : (!verify ? (requireTLS ? .require : .prefer) : (checksHostname ? .verifyFull : .verifyCA))
+        let tls = try TLSContext.load(mode: tlsMode, files: tlsFiles, secret: tlsSecret, serverName: parameters.tlsServerName)
+
         return MongoSettings(
             hosts: hosts,
             credential: credential,
             useTLS: useTLS,
             requireTLS: requireTLS,
             verifyCertificate: verify,
+            tls: tls,
             database: database,
             replicaSet: replicaSet,
             readPreference: readPreference,
@@ -124,12 +142,13 @@ struct MongoSettings: Sendable {
 }
 
 /// MongoDB over OP_MSG with SCRAM authentication, TLS, a JavaScriptCore shell and document browsing.
-public final class MongoConnection: DatabaseConnection {
+public final class MongoConnection: DatabaseConnection, TLSReporting {
     public var kind: DatabaseKind { parameters.config.kind }
     /// Unused: MongoDB has no SQL. Kept because the protocol requires one.
     public let dialect: SQLDialect = .postgresql
     public private(set) var serverVersion: String = ""
     public var isTLS: Bool { link?.isTLS ?? false }
+    public var tlsProtocolVersion: String? { link?.tlsProtocolVersion }
     /// `standalone`, `replica set rs0 (primary)` or `mongos`, for diagnostics.
     public private(set) var topology: String = ""
 
@@ -265,14 +284,14 @@ public final class MongoConnection: DatabaseConnection {
             try transport.connect(host: host.host, port: host.port, timeout: settings.connectTimeout)
             deadline?.watch(transport)
             if tls {
-                try transport.startTLS(host: host.host, verifyCertificate: settings.verifyCertificate)
+                try transport.startTLS(settings.tls.options(host: host.host))
             }
             let link = MongoLink(transport: transport, host: host.host, port: host.port)
             do {
                 try link.handshake(saslSupportedMechsFor: credential.map { "\($0.source).\($0.user)" })
             } catch {
                 link.close()
-                throw error
+                throw tls ? transport.tlsHandshakeError(error, endpoint: host.description) : error
             }
             return link
         }
@@ -302,7 +321,11 @@ public final class MongoConnection: DatabaseConnection {
         return link
     }
 
-    private func tlsHandshakeError(host: MongoHost, reason: String, settings: MongoSettings) -> DatabaseError {
+    private func tlsHandshakeError(host: MongoHost, reason rawReason: String, settings: MongoSettings) -> DatabaseError {
+        // Already explained by the transport: a certificate or client certificate problem.
+        if rawReason.hasPrefix("TLS handshake with \(host) failed: ") { return .connection(rawReason) }
+        let generic = "TLS handshake with \(host) failed. "
+        let reason = rawReason.hasPrefix(generic) ? String(rawReason.dropFirst(generic.count)) : rawReason
         guard settings.verifyCertificate else {
             return .connection("TLS handshake with \(host) failed. The server may not accept TLS connections. \(reason)")
         }

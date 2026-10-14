@@ -7,7 +7,9 @@ public enum SSLMode: String, Codable, CaseIterable, Sendable, Identifiable {
     case prefer
     /// Require TLS, without verifying the certificate.
     case require
-    /// Require TLS and verify the certificate chain and host name.
+    /// Require TLS and verify the certificate chain (libpq `verify-ca`), not the host name.
+    case verifyCA
+    /// Require TLS and verify the certificate chain and host name (libpq `verify-full`, MySQL `VERIFY_IDENTITY`).
     case verifyFull
 
     public var id: String { rawValue }
@@ -17,13 +19,80 @@ public enum SSLMode: String, Codable, CaseIterable, Sendable, Identifiable {
         case .disable: return "Disabled"
         case .prefer: return "Preferred"
         case .require: return "Required"
-        case .verifyFull: return "Verify Full"
+        case .verifyCA: return "Verify CA"
+        case .verifyFull: return "Verify Identity"
+        }
+    }
+
+    /// One line for the connection form.
+    public var summary: String {
+        switch self {
+        case .disable: return "No encryption."
+        case .prefer: return "Encrypt when the server supports it, without verifying its certificate."
+        case .require: return "Always encrypt, without verifying the server certificate."
+        case .verifyCA: return "Always encrypt and verify that a trusted CA signed the server certificate (verify-ca)."
+        case .verifyFull: return "Always encrypt, verify the CA and that the certificate matches the host name (verify-full)."
+        }
+    }
+
+    /// The libpq `sslmode` spelling.
+    public var libpqName: String {
+        switch self {
+        case .disable: return "disable"
+        case .prefer: return "prefer"
+        case .require: return "require"
+        case .verifyCA: return "verify-ca"
+        case .verifyFull: return "verify-full"
         }
     }
 
     public var wantsTLS: Bool { self != .disable }
-    public var requiresTLS: Bool { self == .require || self == .verifyFull }
-    public var verifiesCertificate: Bool { self == .verifyFull }
+    public var requiresTLS: Bool { self == .require || self == .verifyCA || self == .verifyFull }
+    public var verifiesCertificate: Bool { self == .verifyCA || self == .verifyFull }
+    public var verifiesHostname: Bool { self == .verifyFull }
+}
+
+/// Certificate files for TLS. Only paths are saved; the key passphrase or PKCS#12 password is kept in the
+/// credential store (`CredentialStore.tlsSecret`).
+public struct TLSCertificateFiles: Codable, Hashable, Sendable {
+    /// PEM file with the CA certificates to trust (a bundle may hold several). Used by Verify CA and Verify Identity;
+    /// empty means the system trust store.
+    public var caCertificatePath: String
+    /// PEM client certificate, optionally followed by intermediates. May also hold the key.
+    public var clientCertificatePath: String
+    /// PEM private key of the client certificate, possibly encrypted.
+    public var clientKeyPath: String
+    /// PKCS#12 (.p12/.pfx) with the client certificate and key; replaces the two fields above when set.
+    public var pkcs12Path: String
+
+    public init(caCertificatePath: String = "", clientCertificatePath: String = "", clientKeyPath: String = "", pkcs12Path: String = "") {
+        self.caCertificatePath = caCertificatePath
+        self.clientCertificatePath = clientCertificatePath
+        self.clientKeyPath = clientKeyPath
+        self.pkcs12Path = pkcs12Path
+    }
+
+    public var isEmpty: Bool {
+        caCertificatePath.isEmpty && clientCertificatePath.isEmpty && clientKeyPath.isEmpty && pkcs12Path.isEmpty
+    }
+
+    /// True when a client certificate is configured (PEM or PKCS#12).
+    public var hasClientCertificate: Bool { !clientCertificatePath.isEmpty || !pkcs12Path.isEmpty }
+
+    /// True when a passphrase could apply: an encrypted key (possibly inside the certificate file) or a PKCS#12 file.
+    public var needsSecret: Bool { !clientCertificatePath.isEmpty || !clientKeyPath.isEmpty || !pkcs12Path.isEmpty }
+
+    private enum CodingKeys: String, CodingKey {
+        case caCertificatePath, clientCertificatePath, clientKeyPath, pkcs12Path
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        caCertificatePath = try container.decodeIfPresent(String.self, forKey: .caCertificatePath) ?? ""
+        clientCertificatePath = try container.decodeIfPresent(String.self, forKey: .clientCertificatePath) ?? ""
+        clientKeyPath = try container.decodeIfPresent(String.self, forKey: .clientKeyPath) ?? ""
+        pkcs12Path = try container.decodeIfPresent(String.self, forKey: .pkcs12Path) ?? ""
+    }
 }
 
 public enum ConnectionColor: String, Codable, CaseIterable, Sendable, Identifiable {
@@ -70,6 +139,14 @@ public struct ConnectionConfig: Codable, Hashable, Sendable, Identifiable {
     public var ssh: SSHConfig?
     /// Engine-specific settings, keyed by `ConnectionOption`. Optional so older saved connections still decode.
     public var options: [String: String]?
+    /// CA and client certificate files. Nil when none are set (and for connections saved before they existed).
+    public var tlsFiles: TLSCertificateFiles?
+
+    /// Non-optional view of `tlsFiles`; setting empty paths stores nil.
+    public var certificates: TLSCertificateFiles {
+        get { tlsFiles ?? TLSCertificateFiles() }
+        set { tlsFiles = newValue.isEmpty ? nil : newValue }
+    }
 
     public func option(_ key: ConnectionOption) -> String? {
         guard let value = options?[key.rawValue], !value.isEmpty else { return nil }
@@ -171,11 +248,16 @@ public struct ConnectionParameters: Sendable {
     public var password: String
     /// SSH password or key passphrase, when the tunnel needs one.
     public var sshSecret: String?
+    /// Passphrase of the TLS client key, or the PKCS#12 password.
+    public var tlsSecret: String?
+    /// Host name for TLS (SNI and Verify Identity) when it differs from `config.host`, as behind an SSH tunnel.
+    public var tlsServerName: String?
 
-    public init(config: ConnectionConfig, password: String, sshSecret: String? = nil) {
+    public init(config: ConnectionConfig, password: String, sshSecret: String? = nil, tlsSecret: String? = nil) {
         self.config = config
         self.password = password
         self.sshSecret = sshSecret
+        self.tlsSecret = tlsSecret
     }
 }
 

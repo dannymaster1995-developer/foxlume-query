@@ -3,17 +3,17 @@ import Foundation
 
 /// A blocking TCP stream that can upgrade to TLS in place.
 ///
-/// PostgreSQL and MySQL both negotiate TLS after a plaintext exchange (STARTTLS style),
-/// which Network.framework cannot do on an open connection. CFStream can: setting
-/// `kCFStreamPropertySSLSettings` on an open socket stream starts the handshake.
+/// PostgreSQL and MySQL both negotiate TLS after a plaintext exchange (STARTTLS style). The plaintext part runs on a
+/// plain BSD socket; `startTLS` hands that socket to `NetworkTLSStream`, which runs TLS 1.2/1.3 through
+/// Network.framework (custom CA, host name checks, client certificates) without reconnecting.
 public final class SocketTransport {
     private var socketHandle: Int32 = -1
-    private var input: InputStream?
-    private var output: OutputStream?
+    private var tls: NetworkTLSStream?
     private var buffer = [UInt8]()
     private var bufferStart = 0
     private var scratch = [UInt8](repeating: 0, count: 64 * 1024)
     private let closeLock = NSLock()
+    private var connectTimeout: TimeInterval = 10
 
     public private(set) var isTLS = false
     public private(set) var isOpen = false
@@ -22,7 +22,14 @@ public final class SocketTransport {
 
     deinit { close() }
 
+    /// The TLS version agreed with the server ("TLS 1.3"), once the handshake has run.
+    public var tlsProtocolVersion: String? { tls?.protocolVersion }
+
+    /// Why the TLS handshake or session failed, in plain words, when it was a TLS problem.
+    public var tlsFailure: TLSFailure? { tls?.failure }
+
     public func connect(host: String, port: Int, timeout: TimeInterval) throws {
+        connectTimeout = timeout
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = SOCK_STREAM
@@ -37,6 +44,7 @@ public final class SocketTransport {
         defer { freeaddrinfo(first) }
 
         var lastError = "connection failed"
+        var connected: Int32 = -1
         var candidate: UnsafeMutablePointer<addrinfo>? = first
         while let info = candidate {
             candidate = info.pointee.ai_next
@@ -50,35 +58,21 @@ public final class SocketTransport {
                 Darwin.close(fd)
                 continue
             }
-            socketHandle = fd
+            connected = fd
             break
         }
-        guard socketHandle >= 0 else {
+        guard connected >= 0 else {
             throw DatabaseError.connection("Cannot connect to \(host):\(port): \(lastError)")
         }
 
         var on: Int32 = 1
-        setsockopt(socketHandle, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(socketHandle, IPPROTO_TCP, TCP_NODELAY, &on, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(socketHandle, SOL_SOCKET, SO_KEEPALIVE, &on, socklen_t(MemoryLayout<Int32>.size))
-
-        var readStream: Unmanaged<CFReadStream>?
-        var writeStream: Unmanaged<CFWriteStream>?
-        CFStreamCreatePairWithSocket(kCFAllocatorDefault, socketHandle, &readStream, &writeStream)
-        guard let readStream, let writeStream else {
-            Darwin.close(socketHandle)
-            socketHandle = -1
-            throw DatabaseError.connection("Cannot create socket streams")
-        }
-        let input = readStream.takeRetainedValue() as InputStream
-        let output = writeStream.takeRetainedValue() as OutputStream
-        input.setProperty(kCFBooleanTrue, forKey: Stream.PropertyKey(kCFStreamPropertyShouldCloseNativeSocket as String))
-        output.setProperty(kCFBooleanTrue, forKey: Stream.PropertyKey(kCFStreamPropertyShouldCloseNativeSocket as String))
-        input.open()
-        output.open()
-        self.input = input
-        self.output = output
+        setsockopt(connected, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(connected, IPPROTO_TCP, TCP_NODELAY, &on, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(connected, SOL_SOCKET, SO_KEEPALIVE, &on, socklen_t(MemoryLayout<Int32>.size))
+        closeLock.lock()
+        socketHandle = connected
         isOpen = true
+        closeLock.unlock()
     }
 
     /// Non-blocking connect with a deadline, then back to blocking mode.
@@ -102,31 +96,42 @@ public final class SocketTransport {
         return socketError == 0 ? nil : String(cString: strerror(socketError))
     }
 
-    /// Upgrade the open stream to TLS. The handshake runs on the next read or write.
-    public func startTLS(host: String, verifyCertificate: Bool) throws {
-        guard let input, let output else { throw DatabaseError.notConnected }
+    /// Upgrade the open stream to TLS. The handshake runs right away; its outcome surfaces on the next read or
+    /// write, so a certificate problem is reported before any data is sent.
+    public func startTLS(_ options: TLSClientOptions) throws {
         guard availableBuffered == 0 else {
             throw DatabaseError.protocolViolation("Plaintext bytes received before the TLS handshake")
         }
-        var settings: [String: Any] = [
-            kCFStreamSSLValidatesCertificateChain as String: verifyCertificate,
-        ]
-        if verifyCertificate || !Self.isIPAddress(host) {
-            settings[kCFStreamSSLPeerName as String] = verifyCertificate ? host : NSNull()
+        closeLock.lock()
+        guard isOpen, socketHandle >= 0, tls == nil else {
+            closeLock.unlock()
+            throw DatabaseError.notConnected
         }
-        let key = Stream.PropertyKey(kCFStreamPropertySSLSettings as String)
-        guard input.setProperty(settings as NSDictionary, forKey: key),
-              output.setProperty(settings as NSDictionary, forKey: key)
-        else {
-            throw DatabaseError.connection("This system refused to start TLS on the connection")
+        let fd = socketHandle
+        // The TLS stream owns the socket from here on, even when it fails to start.
+        socketHandle = -1
+        closeLock.unlock()
+        let stream: NetworkTLSStream
+        do {
+            stream = try NetworkTLSStream(socket: fd, options: options, timeout: max(5, connectTimeout))
+        } catch {
+            closeLock.lock()
+            isOpen = false
+            closeLock.unlock()
+            throw error
         }
+        closeLock.lock()
+        tls = stream
         isTLS = true
+        let stillOpen = isOpen
+        closeLock.unlock()
+        if !stillOpen { stream.close() }
     }
 
-    private static func isIPAddress(_ host: String) -> Bool {
-        var v4 = in_addr()
-        var v6 = in6_addr()
-        return inet_pton(AF_INET, host, &v4) == 1 || inet_pton(AF_INET6, host, &v6) == 1
+    /// TLS without custom certificates: verify against the system roots and the host name, or not at all.
+    public func startTLS(host: String, verifyCertificate: Bool) throws {
+        let verification = TLSVerification(level: verifyCertificate ? .chainAndHostname : .none)
+        try startTLS(TLSClientOptions(serverName: host, verification: verification))
     }
 
     private var availableBuffered: Int { buffer.count - bufferStart }
@@ -136,14 +141,19 @@ public final class SocketTransport {
     }
 
     public func write(_ bytes: [UInt8]) throws {
-        guard let output, isOpen else { throw DatabaseError.notConnected }
+        guard isOpen else { throw DatabaseError.notConnected }
+        if let tls {
+            try tls.write(bytes)
+            return
+        }
+        let fd = socketHandle
+        guard fd >= 0 else { throw DatabaseError.notConnected }
         var written = 0
         while written < bytes.count {
-            let n = bytes.withUnsafeBufferPointer { pointer in
-                output.write(pointer.baseAddress! + written, maxLength: bytes.count - written)
-            }
+            let n = bytes.withUnsafeBytes { Darwin.send(fd, $0.baseAddress! + written, bytes.count - written, 0) }
+            if n < 0, errno == EINTR { continue }
             if n <= 0 {
-                throw DatabaseError.connection(streamErrorText(output.streamError, fallback: "Connection closed while writing"))
+                throw DatabaseError.connection(Self.posixErrorText(n < 0 ? errno : EPIPE, fallback: "Connection closed while writing"))
             }
             written += n
         }
@@ -172,12 +182,21 @@ public final class SocketTransport {
     }
 
     private func fill() throws {
-        guard let input, isOpen else { throw DatabaseError.notConnected }
-        let n = scratch.withUnsafeMutableBufferPointer { pointer in
-            input.read(pointer.baseAddress!, maxLength: pointer.count)
+        guard isOpen else { throw DatabaseError.notConnected }
+        if let tls {
+            let bytes = try tls.read(maxLength: scratch.count)
+            if bytes.isEmpty { throw DatabaseError.connection("The server closed the connection") }
+            buffer.append(contentsOf: bytes)
+            return
         }
+        let fd = socketHandle
+        guard fd >= 0 else { throw DatabaseError.notConnected }
+        var n: Int
+        repeat {
+            n = scratch.withUnsafeMutableBytes { Darwin.recv(fd, $0.baseAddress, $0.count, 0) }
+        } while n < 0 && errno == EINTR
         if n < 0 {
-            throw DatabaseError.connection(streamErrorText(input.streamError, fallback: "Connection error while reading"))
+            throw DatabaseError.connection(Self.posixErrorText(errno, fallback: "Connection error while reading"))
         }
         if n == 0 {
             throw DatabaseError.connection("The server closed the connection")
@@ -185,35 +204,30 @@ public final class SocketTransport {
         buffer.append(contentsOf: scratch[0..<n])
     }
 
-    private func streamErrorText(_ error: Error?, fallback: String) -> String {
-        guard let error else { return fallback }
-        let nsError = error as NSError
-        if nsError.domain == NSOSStatusErrorDomain || nsError.domain == "kCFStreamErrorDomainSSL" {
-            let status = OSStatus(truncatingIfNeeded: nsError.code)
-            let message = SecCopyErrorMessageString(status, nil) as String? ?? nsError.localizedDescription
-            return "TLS error (\(nsError.code)): \(message)"
+    private static func posixErrorText(_ code: Int32, fallback: String) -> String {
+        switch code {
+        case EPIPE, ECONNRESET, ENOTCONN, ECONNABORTED:
+            return "The connection to the server was lost (\(String(cString: strerror(code)).lowercased()))."
+        case ETIMEDOUT:
+            return "The connection to the server timed out."
+        case 0:
+            return fallback
+        default:
+            return "\(fallback): \(String(cString: strerror(code)))"
         }
-        if nsError.domain == NSPOSIXErrorDomain {
-            switch Int32(nsError.code) {
-            case EPIPE, ECONNRESET, ENOTCONN, ECONNABORTED:
-                return "The connection to the server was lost (\(String(cString: strerror(Int32(nsError.code))).lowercased()))."
-            case ETIMEDOUT:
-                return "The connection to the server timed out."
-            default:
-                break
-            }
-        }
-        return nsError.localizedDescription
     }
 
     /// Wake a read or write blocked on another thread. The owner still calls `close()` afterwards.
-    /// `CFReadStreamRead` does not return when its stream is closed from another thread, but it does after `shutdown(2)`;
-    /// the lock keeps the descriptor from being closed and reused while it is shut down.
+    /// The lock keeps the descriptor from being closed and reused while it is shut down.
     public func interrupt() {
         closeLock.lock()
         defer { closeLock.unlock() }
-        guard isOpen, socketHandle >= 0 else { return }
-        shutdown(socketHandle, SHUT_RDWR)
+        guard isOpen else { return }
+        if let tls {
+            tls.interrupt()
+        } else if socketHandle >= 0 {
+            shutdown(socketHandle, SHUT_RDWR)
+        }
     }
 
     /// Close the socket. Safe to call more than once. Use `interrupt()` to abort a read from another thread.
@@ -222,13 +236,12 @@ public final class SocketTransport {
         defer { closeLock.unlock() }
         guard isOpen else { return }
         isOpen = false
-        if socketHandle >= 0 {
+        if let tls {
+            tls.close()
+        } else if socketHandle >= 0 {
             shutdown(socketHandle, SHUT_RDWR)
+            Darwin.close(socketHandle)
         }
-        input?.close()
-        output?.close()
-        input = nil
-        output = nil
         socketHandle = -1
     }
 }

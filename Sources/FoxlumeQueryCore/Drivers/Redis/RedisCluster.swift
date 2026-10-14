@@ -216,7 +216,7 @@ final class RedisClusterRouter {
 
     static func resolvedSSL(_ mode: SSLMode, isTLS: Bool) -> SSLMode {
         guard isTLS else { return .disable }
-        return mode.verifiesCertificate ? .verifyFull : .require
+        return mode.verifiesCertificate ? mode : .require
     }
 
     var masters: [RedisEndpoint] { topology.masters }

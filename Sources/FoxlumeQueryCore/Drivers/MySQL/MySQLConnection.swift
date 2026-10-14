@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 /// MySQL and MariaDB over the client/server text protocol.
-public final class MySQLConnection: DatabaseConnection {
+public final class MySQLConnection: DatabaseConnection, TLSReporting {
     public var kind: DatabaseKind { parameters.config.kind }
     public private(set) var serverVersion: String = ""
     public private(set) var currentDatabase: String?
@@ -46,6 +46,7 @@ public final class MySQLConnection: DatabaseConnection {
     deinit { close() }
 
     var isTLS: Bool { transport?.isTLS ?? false }
+    public var tlsProtocolVersion: String? { transport?.tlsProtocolVersion }
 
     var isMariaDB: Bool {
         kind == .mariadb || serverVersion.range(of: "MariaDB", options: .caseInsensitive) != nil
@@ -65,7 +66,8 @@ public final class MySQLConnection: DatabaseConnection {
         deadline.watch(transport)
         let timedOut = DatabaseError.connection("Timed out after \(Int(timeout)) seconds waiting for the MySQL handshake from \(config.host):\(config.port).")
         do {
-            try handshake(transport: transport)
+            let tls = try TLSContext.load(parameters)
+            try handshake(transport: transport, tls: tls)
         } catch {
             let fired = deadline.finish()
             transport.close()
@@ -77,7 +79,7 @@ public final class MySQLConnection: DatabaseConnection {
         }
     }
 
-    private func handshake(transport: SocketTransport) throws {
+    private func handshake(transport: SocketTransport, tls: TLSContext) throws {
         let config = parameters.config
         let stream = MySQLPacketStream(channel: transport)
         let first = try stream.read()
@@ -103,7 +105,7 @@ public final class MySQLConnection: DatabaseConnection {
             var request = ByteWriter(capacity: 32)
             Self.writeResponsePrefix(&request, capabilities: client)
             try stream.write(request.bytes)
-            try transport.startTLS(host: config.host, verifyCertificate: config.sslMode.verifiesCertificate)
+            try transport.startTLS(tls.options(host: config.host))
             useTLS = true
         } else if config.sslMode.requiresTLS {
             throw DatabaseError.connection("The server does not support SSL/TLS, which this connection requires.")
@@ -134,8 +136,8 @@ public final class MySQLConnection: DatabaseConnection {
             // With TLS, this first write runs the TLS handshake.
             try stream.write(response.bytes)
             ok = try authenticate(stream: stream, plugin: plugin, scramble: greeting.scramble, isTLS: useTLS)
-        } catch DatabaseError.connection(let message) where useTLS && message.hasPrefix("TLS error") {
-            throw Self.tlsFailure(message, verifying: config.sslMode.verifiesCertificate)
+        } catch {
+            throw Self.explain(transport.tlsHandshakeError(error, endpoint: nil), tls: tls, isTLS: useTLS)
         }
 
         stateLock.lock()
@@ -148,21 +150,13 @@ public final class MySQLConnection: DatabaseConnection {
         currentDatabase = config.database.isEmpty ? nil : config.database
     }
 
-    /// errSSLXCertChainInvalid, errSSLBadCert, errSSLUnknownRootCert, errSSLNoRootCert, errSSLCertExpired,
-    /// errSSLCertNotYetValid, errSSLHostNameMismatch, errSecNotTrusted.
-    private static let certificateErrors: Set<OSStatus> = [-9807, -9808, -9812, -9813, -9814, -9815, -9843, -67843]
-
-    /// `SocketTransport` reports TLS failures as a bare OSStatus; spell out what went wrong.
-    static func tlsFailure(_ message: String, verifying: Bool) -> DatabaseError {
-        guard let range = message.range(of: #"-?\d+"#, options: .regularExpression),
-              let status = OSStatus(message[range])
-        else { return .connection("TLS handshake failed: \(message)") }
-        let reason = (SecCopyErrorMessageString(status, nil) as String?) ?? "OSStatus \(status)"
-        var text = "TLS handshake failed: \(reason) (\(status))."
-        if verifying, certificateErrors.contains(status) {
-            text += " The server certificate is not trusted for this host. Use SSL mode Required to encrypt without verifying it."
-        }
-        return .connection(text)
+    /// A user created with `REQUIRE X509` is refused with the same "Access denied" as a wrong password when no client
+    /// certificate was sent; mention the certificate.
+    static func explain(_ error: Error, tls: TLSContext, isTLS: Bool) -> Error {
+        guard isTLS, tls.identity == nil, case DatabaseError.authentication(let message)? = error as? DatabaseError,
+              message.contains("Access denied")
+        else { return error }
+        return DatabaseError.authentication("\(message) Check the password. If the user requires a client certificate (REQUIRE X509), choose one in the SSL/TLS settings.")
     }
 
     /// The fixed 32-byte head shared by SSLRequest and HandshakeResponse41.

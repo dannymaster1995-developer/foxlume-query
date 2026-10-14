@@ -3,7 +3,7 @@ import Foundation
 /// Redis (and compatible servers) over RESP3, or RESP2 where HELLO is missing: standalone, behind Sentinel, or Cluster.
 ///
 /// Logical databases (`db0`, `db1`, …) are listed as `.keyspace` tables whose rows are keys.
-public final class RedisConnection: DatabaseConnection {
+public final class RedisConnection: DatabaseConnection, TLSReporting {
     enum Mode: String {
         case standalone
         case sentinel
@@ -30,6 +30,8 @@ public final class RedisConnection: DatabaseConnection {
     private var isOpen = false
     /// SSL mode after the first connect resolved `prefer`, so reconnects and helper connections skip the probe.
     private var resolvedSSL: SSLMode = .disable
+    /// CA and client certificates, read once per `connect()`.
+    private var tlsContext = TLSContext(mode: .disable)
 
     /// MULTI opened from the editor and not yet ended.
     private(set) var inTransaction = false
@@ -57,6 +59,7 @@ public final class RedisConnection: DatabaseConnection {
     deinit { close() }
 
     var isTLS: Bool { link?.isTLS ?? cluster?.openLinks.first?.isTLS ?? false }
+    public var tlsProtocolVersion: String? { (link ?? cluster?.openLinks.first)?.transport.tlsProtocolVersion }
     var protocolVersion: Int { link?.protocolVersion ?? cluster?.openLinks.first?.protocolVersion ?? 0 }
 
     public var capabilities: EngineCapabilities {
@@ -95,6 +98,10 @@ public final class RedisConnection: DatabaseConnection {
             }
             databaseIndex = index
         }
+        let tls = try TLSContext.load(parameters)
+        stateLock.lock()
+        tlsContext = tls
+        stateLock.unlock()
         setResolvedSSL(config.sslMode)
         if mode == .cluster {
             try openCluster()
@@ -118,13 +125,10 @@ public final class RedisConnection: DatabaseConnection {
         var options = RedisNodeLink.Options(endpoint: endpoint)
         options.user = config.user
         options.password = parameters.password
-        if let ssl {
-            options.sslMode = ssl
-        } else {
-            stateLock.lock()
-            options.sslMode = resolvedSSL
-            stateLock.unlock()
-        }
+        stateLock.lock()
+        options.sslMode = ssl ?? resolvedSSL
+        options.tls = tlsContext
+        stateLock.unlock()
         options.timeout = TimeInterval(max(1, config.connectTimeout))
         options.preferRESP3 = preferRESP3
         return options

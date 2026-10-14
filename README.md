@@ -26,8 +26,9 @@ they have had less testing and some features are missing.
 **Connections**
 - Saved connections with groups, colors and environment labels (Local, Development, Staging, Production).
 - Safe Mode per connection: Silent, Alert (confirm writes), Alert (Full) (confirm everything), Safe Mode and Safe Mode (Full) (confirm, then Touch ID or your password), or Read-Only.
-- TLS modes Disabled, Preferred, Required and Verify Full. SSH tunnels through the system `ssh` (agent, key file or password).
-- Open a connection from a URL (`postgres://`, `mysql://`, `mongodb://`, `redis://` …).
+- TLS 1.2 and 1.3 with the modes Disabled, Preferred, Required, Verify CA and Verify Identity (libpq's verify-ca and verify-full). A custom CA certificate (PEM, bundles allowed) replaces the system roots in the verify modes, and a client certificate for mutual TLS comes from PEM files (RSA or EC key, encrypted keys included) or a PKCS#12 file (macOS 15 and later). Certificates and keys stay in memory, never in a keychain; the key passphrase is kept with the password. The form checks each file as you choose it, and TLS errors say what failed: unknown CA, host name mismatch, expired certificate, client certificate refused, wrong passphrase. PostgreSQL and MySQL; MongoDB and Redis in beta.
+- SSH tunnels through the system `ssh` (agent, key file or password).
+- Open a connection from a URL (`postgres://`, `mysql://`, `mongodb://`, `redis://` …), including `sslmode`, `sslrootcert`, `sslcert`, `sslkey` and `sslpassword` for PostgreSQL, `ssl-mode`, `ssl-ca`, `ssl-cert` and `ssl-key` for MySQL, and `tlsCAFile` and `tlsCertificateKeyFile` in MongoDB connection strings.
 - Passwords are kept in the macOS Keychain.
 - A periodic health check reconnects dropped connections in the background, and running something on a lost connection reconnects first.
 
@@ -72,7 +73,7 @@ they have had less testing and some features are missing.
 - Open Quickly (⇧⌘O): one fuzzy search over tables and views (all schemas), databases, schemas, procedures, functions, triggers and types, saved queries and recent history, with the tables, saved queries and history of the other open connections. Results rank by match and by how often and recently you opened them.
 - Open tabs come back when you reopen a connection; ⇧⌘T reopens a closed tab.
 
-**Not there yet:** SQL Server and many other engines, a graphical plan diagram, ER diagrams, JSON and XLSX import. TLS connections are limited to TLS 1.2 for now.
+**Not there yet:** SQL Server and many other engines, a graphical plan diagram, ER diagrams, JSON and XLSX import. MongoDB X.509 authentication, certificate revocation checks and SCRAM channel binding are not supported yet.
 
 ## Building from source
 
@@ -118,7 +119,7 @@ port on 127.0.0.1 and skip otherwise. The credentials they use are local test va
 | Data | Location |
 |---|---|
 | Connections, settings, history, saved queries, filter presets, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
-| Database and SSH passwords | macOS Keychain, service `com.foxlume.query.connection` |
+| Database and SSH passwords, TLS key passphrases | macOS Keychain, service `com.foxlume.query.connection` |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder
 (passwords in a file readable only by you). `scripts/run-portable.sh` starts the app this way.
@@ -169,7 +170,8 @@ Sources/
   FoxlumeQueryCore/     UI-independent library
     Models/             connection settings, results, schema types
     Drivers/            DatabaseConnection protocol, DatabaseSession (serial queue, ping, reconnect)
-      Transport/        TCP + TLS sockets, SSH tunnel, connect deadlines
+      Transport/        TCP sockets with in-place TLS upgrade, SSH tunnel, connect deadlines
+      TLS/              Network.framework TLS stream, PEM / key decoding, client identities, certificate checks
       Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/
     SQL/                dialects, statement splitting, query languages, table queries, change generation, formatter
     Completion/         query editor completion engines
@@ -184,7 +186,7 @@ Sources/
   fqprobe/              driver probe CLI
 Tests/FoxlumeQueryCoreTests/   Swift Testing suites for the core library
 Tests/FoxlumeQueryAppTests/    editor, filter bar, workspace, saved query, Open Quickly and grid selection / paste checks against the real AppKit classes
-scripts/                build, environment, test servers, sample data
+scripts/                build, environment, test servers (dbtest-tls.sh: TLS scratch servers), test certificates, sample data
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to work on the code and [SECURITY.md](SECURITY.md) for reporting

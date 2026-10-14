@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openDatabaseFile(URL(fileURLWithPath: parsed.config.filePath))
             return
         }
-        connect(parsed.config, password: parsed.password)
+        connect(parsed.config, password: parsed.password, tlsSecret: parsed.tlsSecret)
     }
 
     // MARK: Welcome
@@ -267,7 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connect(config)
     }
 
-    func connect(_ config: ConnectionConfig, password overridePassword: String? = nil, completion: ((WorkspaceWindowController?) -> Void)? = nil) {
+    func connect(_ config: ConnectionConfig, password overridePassword: String? = nil, tlsSecret overrideTLSSecret: String? = nil, completion: ((WorkspaceWindowController?) -> Void)? = nil) {
         if let open = workspaces.first(where: { $0.workspace.config.id == config.id }) {
             open.window?.makeKeyAndOrderFront(nil)
             completion?(open)
@@ -275,7 +275,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let password = overridePassword ?? AppEnvironment.credentials.password(for: config.id) ?? ""
         let sshSecret = AppEnvironment.credentials.sshSecret(for: config.id)
-        let workspace = ConnectionWorkspace(config: config, password: password, sshSecret: sshSecret)
+        let tlsSecret = overrideTLSSecret ?? AppEnvironment.credentials.tlsSecret(for: config.id)
+        let workspace = ConnectionWorkspace(config: config, password: password, sshSecret: sshSecret, tlsSecret: tlsSecret)
         welcome?.model.connectingID = config.id
         Task {
             do {

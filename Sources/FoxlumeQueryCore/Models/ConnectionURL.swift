@@ -5,6 +5,8 @@ public enum ConnectionURL {
     public struct Parsed: Sendable {
         public var config: ConnectionConfig
         public var password: String
+        /// Client key passphrase from libpq's `sslpassword`, kept out of the saved config like the password.
+        public var tlsSecret: String? = nil
     }
 
     /// URL schemes Foxlume Query registers with macOS.
@@ -80,14 +82,45 @@ public enum ConnectionURL {
             config.sslMode = scheme == "rediss" ? .require : .disable
         default:
             config.database = path
-            switch (query["sslmode"] ?? query["ssl-mode"] ?? query["ssl"] ?? "").lowercased() {
-            case "disable", "disabled", "false", "0": config.sslMode = .disable
-            case "require", "required", "true", "1": config.sslMode = .require
-            case "verify-full", "verify_identity", "verify-ca", "verify_ca": config.sslMode = .verifyFull
-            default: break
+            if let mode = sslMode(query["sslmode"] ?? query["ssl-mode"] ?? query["ssl_mode"] ?? query["ssl"] ?? "") {
+                config.sslMode = mode
             }
         }
+        // Certificate files: libpq names for PostgreSQL, the mysql client's option names for MySQL and MariaDB.
+        var files = TLSCertificateFiles()
+        if kind == .postgresql {
+            files.caCertificatePath = query["sslrootcert"] ?? ""
+            files.clientCertificatePath = query["sslcert"] ?? ""
+            files.clientKeyPath = query["sslkey"] ?? ""
+        } else if kind == .mysql || kind == .mariadb {
+            files.caCertificatePath = query["ssl-ca"] ?? query["ssl_ca"] ?? query["sslca"] ?? ""
+            files.clientCertificatePath = query["ssl-cert"] ?? query["ssl_cert"] ?? ""
+            files.clientKeyPath = query["ssl-key"] ?? query["ssl_key"] ?? ""
+        }
+        files.caCertificatePath = expandedPath(files.caCertificatePath)
+        files.clientCertificatePath = expandedPath(files.clientCertificatePath)
+        files.clientKeyPath = expandedPath(files.clientKeyPath)
+        // libpq's `sslrootcert=system` means the system trust store, which is what an empty CA path does here.
+        if files.caCertificatePath.lowercased() == "system" { files.caCertificatePath = "" }
+        config.certificates = files
         config.name = config.database.isEmpty || kind == .redis ? host : "\(config.database)@\(host)"
-        return Parsed(config: config, password: components.percentEncodedPassword?.removingPercentEncoding ?? "")
+        let tlsSecret = kind == .postgresql ? query["sslpassword"].flatMap { $0.isEmpty ? nil : $0 } : nil
+        return Parsed(config: config, password: components.percentEncodedPassword?.removingPercentEncoding ?? "", tlsSecret: tlsSecret)
+    }
+
+    /// libpq and MySQL spellings: `verify-ca`, `VERIFY_CA`, `verify_identity`, `true` …
+    static func sslMode(_ text: String) -> SSLMode? {
+        switch text.lowercased().replacingOccurrences(of: "_", with: "-") {
+        case "disable", "disabled", "false", "0": return .disable
+        case "allow", "prefer", "preferred": return .prefer
+        case "require", "required", "true", "1": return .require
+        case "verify-ca": return .verifyCA
+        case "verify-full", "verify-identity": return .verifyFull
+        default: return nil
+        }
+    }
+
+    private static func expandedPath(_ path: String) -> String {
+        path.isEmpty ? path : (path as NSString).expandingTildeInPath
     }
 }

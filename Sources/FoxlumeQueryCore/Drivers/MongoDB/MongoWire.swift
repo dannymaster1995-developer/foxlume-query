@@ -89,6 +89,7 @@ final class MongoLink {
     }
 
     var isTLS: Bool { transport.isTLS }
+    var tlsProtocolVersion: String? { transport.tlsProtocolVersion }
     var endpoint: String { host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)" }
 
     /// Wake a blocked read from another thread.

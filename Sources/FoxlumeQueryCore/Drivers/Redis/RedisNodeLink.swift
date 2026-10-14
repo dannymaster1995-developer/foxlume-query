@@ -147,6 +147,8 @@ final class RedisNodeLink {
         var user = ""
         var password = ""
         var sslMode: SSLMode = .disable
+        /// Certificates for TLS links; `sslMode` decides how strictly they are checked.
+        var tls = TLSContext(mode: .disable)
         var timeout: TimeInterval = 10
         /// Try `HELLO 3` first. Tests turn it off to exercise RESP2.
         var preferRESP3 = true
@@ -226,7 +228,7 @@ final class RedisNodeLink {
         deadline.watch(transport)
         let probe = RedisPlaintextProbe(endpoint: endpoint, timeout: options.timeout) { transport.interrupt() }
         do {
-            try transport.startTLS(host: endpoint.host, verifyCertificate: options.sslMode.verifiesCertificate)
+            try transport.startTLS(options.tls.options(host: endpoint.host, mode: options.sslMode))
             probe.start()
             let link = RedisNodeLink(endpoint: endpoint, transport: transport)
             // The TLS handshake runs on the first write, inside `handshake`.
@@ -255,7 +257,7 @@ final class RedisNodeLink {
                 return try openPlain(options, transport: plain)
             case .notPlaintext, .notStarted:
                 if fired { throw DatabaseError.connection("Timed out after \(Int(options.timeout)) seconds waiting for the TLS handshake with \(endpoint).") }
-                throw tlsFailure(error, options: options)
+                throw tlsFailure(transport.tlsHandshakeError(error, endpoint: "\(endpoint)"), options: options)
             }
         }
     }
@@ -269,7 +271,11 @@ final class RedisNodeLink {
     }
 
     private static func tlsFailure(_ error: Error, options: Options) -> DatabaseError {
-        let reason = (error as? DatabaseError)?.errorDescription ?? error.localizedDescription
+        var reason = (error as? DatabaseError)?.errorDescription ?? error.localizedDescription
+        // Already explained by the transport: a certificate or client certificate problem.
+        if reason.hasPrefix("TLS handshake with \(options.endpoint) failed: ") { return .connection(reason) }
+        let generic = "TLS handshake with \(options.endpoint) failed. "
+        if reason.hasPrefix(generic) { reason.removeFirst(generic.count) }
         guard options.sslMode.verifiesCertificate else {
             return .connection("TLS handshake with \(options.endpoint) failed. \(reason)")
         }

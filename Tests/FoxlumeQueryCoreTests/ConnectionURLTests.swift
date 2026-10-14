@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import FoxlumeQueryCore
 
@@ -63,5 +64,40 @@ import Testing
 
         var postgres = ConnectionConfig(kind: .postgresql, host: "db.example.com")
         #expect(postgres.removeEmbeddedPassword() == nil)
+    }
+}
+
+@Suite struct ConnectionURLTLSTests {
+    @Test func postgresCertificateParameters() throws {
+        let parsed = try #require(ConnectionURL.parse("postgresql://app@db.example.com/shop?sslmode=verify-ca&sslrootcert=/etc/ssl/root.pem&sslcert=~/certs/app.crt&sslkey=%2Ftmp%2Fapp.key&sslpassword=pa%26ss"))
+        #expect(parsed.config.sslMode == .verifyCA)
+        #expect(parsed.config.certificates.caCertificatePath == "/etc/ssl/root.pem")
+        #expect(parsed.config.certificates.clientCertificatePath == NSHomeDirectory() + "/certs/app.crt")
+        #expect(parsed.config.certificates.clientKeyPath == "/tmp/app.key")
+        #expect(parsed.tlsSecret == "pa&ss")
+    }
+
+    @Test(arguments: [
+        ("disable", SSLMode.disable), ("allow", .prefer), ("prefer", .prefer), ("require", .require),
+        ("verify-ca", .verifyCA), ("VERIFY_CA", .verifyCA), ("verify-full", .verifyFull), ("VERIFY_IDENTITY", .verifyFull),
+    ])
+    func sslModeSpellings(text: String, mode: SSLMode) throws {
+        let parsed = try #require(ConnectionURL.parse("postgres://u@h/db?sslmode=\(text)"))
+        #expect(parsed.config.sslMode == mode)
+    }
+
+    @Test func systemRootMeansNoCAFile() throws {
+        let parsed = try #require(ConnectionURL.parse("postgres://u@h/db?sslmode=verify-full&sslrootcert=system"))
+        #expect(parsed.config.sslMode == .verifyFull)
+        #expect(parsed.config.tlsFiles == nil)
+    }
+
+    @Test func mysqlCertificateParameters() throws {
+        let parsed = try #require(ConnectionURL.parse("mysql://root:pw@db:3306/app?ssl-mode=VERIFY_IDENTITY&ssl-ca=/ca.pem&ssl-cert=/c.pem&ssl-key=/k.pem"))
+        #expect(parsed.config.sslMode == .verifyFull)
+        #expect(parsed.config.certificates == TLSCertificateFiles(caCertificatePath: "/ca.pem", clientCertificatePath: "/c.pem", clientKeyPath: "/k.pem"))
+        #expect(parsed.tlsSecret == nil)
+        // libpq names mean nothing to MySQL.
+        #expect(try #require(ConnectionURL.parse("mysql://root@db/app?sslrootcert=/ca.pem")).config.tlsFiles == nil)
     }
 }

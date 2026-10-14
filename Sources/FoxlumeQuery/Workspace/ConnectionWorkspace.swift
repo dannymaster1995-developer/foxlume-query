@@ -48,10 +48,10 @@ final class ConnectionWorkspace {
     /// Procedures, functions, triggers and types of the browsed schema; see ConnectionWorkspace+SchemaObjects.swift.
     let schemaObjectCatalog = SchemaObjectCatalog()
 
-    init(config: ConnectionConfig, password: String, sshSecret: String? = nil) {
+    init(config: ConnectionConfig, password: String, sshSecret: String? = nil, tlsSecret: String? = nil) {
         self.config = config
         self.password = password
-        self.session = DatabaseSession(parameters: ConnectionParameters(config: config, password: password, sshSecret: sshSecret))
+        self.session = DatabaseSession(parameters: ConnectionParameters(config: config, password: password, sshSecret: sshSecret, tlsSecret: tlsSecret))
     }
 
     var kind: DatabaseKind { config.kind }
