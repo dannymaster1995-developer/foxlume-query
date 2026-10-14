@@ -156,6 +156,26 @@ final class TabsViewController: NSViewController {
         return controller
     }
 
+    /// Opens the ER diagram of a schema, or selects the one already open, and focuses `table` in it.
+    @discardableResult
+    func openERDiagram(database: String?, schema: String?, focusing table: String? = nil) -> ERDiagramViewController {
+        if let existing = tabs.first(where: { ($0.content as? ERDiagramViewController)?.matches(database: database, schema: schema) == true }),
+           let controller = existing.content as? ERDiagramViewController {
+            select(id: existing.id)
+            if let table { controller.focus(table: table) }
+            return controller
+        }
+        let controller = ERDiagramViewController(workspace: workspace, database: database, schema: schema)
+        controller.onOpenTable = { [weak self] ref in self?.openTable(ref, newTab: true) }
+        controller.onShowStructure = { [weak self] ref in self?.openTable(ref, newTab: true, mode: .structure) }
+        if let table { controller.focus(table: table) }
+        let tab = WorkspaceTab(content: controller, isPreview: false)
+        tabs.append(tab)
+        install(tab)
+        select(id: tab.id)
+        return controller
+    }
+
     /// Closes the source tabs of an object after it was dropped.
     func closeObjectTabs(_ object: SchemaObject) {
         for index in tabs.indices.reversed() where (tabs[index].content as? ObjectSourceViewController)?.object.id == object.id {
@@ -283,9 +303,9 @@ final class TabsViewController: NSViewController {
         refreshStrip()
     }
 
-    /// Table tabs show one database's rows, so they close when the database changes.
+    /// Table tabs show one database's rows, so they close when the database changes; so do its ER diagrams.
     func closeTableTabs() {
-        for index in tabs.indices.reversed() where tabs[index].content is TableTabViewController {
+        for index in tabs.indices.reversed() where tabs[index].content is TableTabViewController || tabs[index].content is ERDiagramViewController {
             remove(at: index)
         }
     }
@@ -323,6 +343,9 @@ final class TabsViewController: NSViewController {
             if let query = tab.content as? QueryTabViewController {
                 return SavedState.Tab(kind: "query", title: query.tabTitle, sql: query.sql, filePath: query.fileURL?.path)
             }
+            if let diagram = tab.content as? ERDiagramViewController {
+                return SavedState.Tab(kind: "diagram", schema: diagram.schema, name: diagram.database)
+            }
             if let source = tab.content as? ObjectSourceViewController {
                 let object = source.object
                 return SavedState.Tab(kind: "object", schema: object.schema, name: object.name, objectKind: object.kind.rawValue,
@@ -345,6 +368,11 @@ final class TabsViewController: NSViewController {
         for tab in state.tabs {
             if tab.kind == "query" {
                 openQuery(sql: tab.sql ?? "", title: tab.title, fileURL: tab.filePath.map { URL(fileURLWithPath: $0) })
+            } else if tab.kind == "diagram" {
+                // `name` holds the diagram's database; it comes back only for the database it showed.
+                if workspace.supportsERDiagram, tab.name == workspace.currentDatabase {
+                    openERDiagram(database: tab.name, schema: tab.schema)
+                }
             } else if tab.kind == "object" {
                 // The text is fetched again; an object that is gone shows "Source Unavailable".
                 if let name = tab.name, let kind = tab.objectKind.flatMap(SchemaObjectKind.init(rawValue:)) {

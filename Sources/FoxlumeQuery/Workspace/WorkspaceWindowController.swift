@@ -100,6 +100,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         }
         history.onSaveQuery = { [weak self] sql in self?.presentSaveQuery(sql: sql) }
         connectSavedQueries()
+        connectERDiagram(sidebar)
         tabs.onSelectionChange = { [weak self] tab in
             guard let self, let table = tab?.table else { return }
             self.sidebar.select(table)
@@ -499,6 +500,7 @@ extension WorkspaceWindowController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if let transfer = validateTransferItem(menuItem.action) { return transfer }
         if let saved = validateSavedQueriesItem(menuItem.action) { return saved }
+        if let diagram = validateDiagramItem(menuItem.action) { return diagram }
         let hasOperations = !workspace.pendingTableOperations.isEmpty
         switch menuItem.action {
         case #selector(saveAll(_:)):

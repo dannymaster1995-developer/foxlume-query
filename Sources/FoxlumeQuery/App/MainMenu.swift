@@ -64,6 +64,7 @@ import AppKit
     @objc optional func newSchema(_ sender: Any?)
     @objc optional func dropSchema(_ sender: Any?)
     @objc optional func reportIssue(_ sender: Any?)
+    @objc optional func showERDiagram(_ sender: Any?)
 }
 
 @MainActor
@@ -151,6 +152,8 @@ enum MainMenu {
             item("Drop Database…", #selector(FoxlumeQueryActions.dropDatabase(_:))),
             item("New Schema…", #selector(FoxlumeQueryActions.newSchema(_:))),
             item("Drop Schema…", #selector(FoxlumeQueryActions.dropSchema(_:))),
+            .separator(),
+            item("ER Diagram", #selector(FoxlumeQueryActions.showERDiagram(_:))),
             .separator(),
             item("Disconnect", #selector(FoxlumeQueryActions.disconnect(_:))),
             item("Reconnect", #selector(FoxlumeQueryActions.reconnect(_:))),

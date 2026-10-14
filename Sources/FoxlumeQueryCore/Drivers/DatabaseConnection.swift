@@ -104,6 +104,10 @@ public protocol DatabaseConnection: AnyObject {
     func triggers(of table: TableRef) throws -> [TriggerInfo]
     /// CHECK constraints of one table, for the Structure view. Empty where the server ignores CHECK.
     func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo]
+    /// Columns, primary and unique keys and foreign keys of every table and view in a schema (MySQL: a database) in a
+    /// few catalog queries, for the ER diagram. Columns carry name, type, nullability and primary key only. Nil when
+    /// the engine has no bulk reader; the caller then reads `structure(of:)` table by table. See DiagramMetadata.swift.
+    func diagramStructures(schema: String?) throws -> [TableStructure]?
 }
 
 /// Keys found by a scan, for the Redis key tree.
@@ -240,6 +244,8 @@ public extension DatabaseConnection {
     func triggers(of table: TableRef) throws -> [TriggerInfo] { [] }
 
     func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo] { [] }
+
+    func diagramStructures(schema: String?) throws -> [TableStructure]? { nil }
 
     func ping() throws {
         switch capabilities.queryLanguage {

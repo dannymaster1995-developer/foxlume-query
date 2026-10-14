@@ -1,16 +1,20 @@
 import AppKit
 import FoxlumeQueryCore
 
-/// One Explain result in the query tab's result area: a Tree | Raw switch, the share metric, the plan's timings,
-/// Copy, then the outline beside the selected step's details, or the server's own output.
+/// One Explain result in the query tab's result area: a Diagram | Tree | Raw switch, the share metric, the plan's
+/// timings, Copy, then the diagram or the outline beside the selected step's details, or the server's own output.
 @MainActor
 final class QueryPlanView: NSView {
     enum Mode: Int {
+        case diagram
         case tree
         case raw
     }
 
-    private let modePicker = NSSegmentedControl(labels: ["Tree", "Raw"], trackingMode: .selectOne, target: nil, action: nil)
+    /// The mode the next plan opens in: Diagram at first, as in TablePro, then whatever was chosen last.
+    static var preferredMode: Mode = .diagram
+
+    private let modePicker = NSSegmentedControl(labels: ["Diagram", "Tree", "Raw"], trackingMode: .selectOne, target: nil, action: nil)
     private let metricPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let summaryLabel = UI.label("", size: 11, color: .secondaryLabelColor)
     private lazy var copyButton = UI.button("Copy", symbol: "doc.on.doc", target: self, action: #selector(copyRaw(_:)))
@@ -19,6 +23,8 @@ final class QueryPlanView: NSView {
     private let bannerLabel = UI.label("", size: 11, color: .secondaryLabelColor)
     private let split = NSSplitView()
     let outlineView = QueryPlanOutlineView()
+    let diagramView = QueryPlanDiagramView()
+    private let planArea = NSView()
     let detailView = QueryPlanDetailView()
     private let rawText = NSTextView()
     private let rawScroll = NSScrollView()
@@ -28,7 +34,7 @@ final class QueryPlanView: NSView {
 
     private(set) var outcome: ExplainOutcome?
     private(set) var analysis: QueryPlanAnalysis?
-    private(set) var mode: Mode = .tree
+    private(set) var mode: Mode = QueryPlanView.preferredMode
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -45,8 +51,10 @@ final class QueryPlanView: NSView {
         modePicker.selectedSegment = 0
         modePicker.target = self
         modePicker.action = #selector(modeChanged(_:))
-        modePicker.setToolTip("The plan as a tree of steps", forSegment: 0)
-        modePicker.setToolTip("The output exactly as the server returned it", forSegment: 1)
+        modePicker.setToolTip("The plan as boxes and arrows", forSegment: 0)
+        modePicker.setToolTip("The plan as a tree of steps", forSegment: 1)
+        modePicker.setToolTip("The output exactly as the server returned it", forSegment: 2)
+        modePicker.setAccessibilityIdentifier("queryPlanMode")
         metricPopup.controlSize = .small
         metricPopup.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         metricPopup.target = self
@@ -74,16 +82,26 @@ final class QueryPlanView: NSView {
 
         split.isVertical = true
         split.dividerStyle = .thin
-        split.addArrangedSubview(outlineView)
+        planArea.addSubviewFilling(outlineView)
+        planArea.addSubviewFilling(diagramView)
+        split.addArrangedSubview(planArea)
         split.addArrangedSubview(detailView)
         // The details keep their width when the window resizes; the outline takes the difference.
         split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         split.setHoldingPriority(.defaultLow + 10, forSubviewAt: 1)
         NSLayoutConstraint.activate([
-            outlineView.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            planArea.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
             detailView.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
         ])
-        outlineView.onSelect = { [weak self] id in self?.showDetails(of: id) }
+        outlineView.onSelect = { [weak self] id in
+            self?.showDetails(of: id)
+            self?.diagramView.select(nodeID: id)
+        }
+        // A step picked in the diagram is picked in the tree, which shows its details.
+        diagramView.onSelect = { [weak self] id in
+            guard let id else { return }
+            self?.outlineView.select(nodeID: id)
+        }
 
         rawText.isEditable = false
         rawText.isSelectable = true
@@ -182,6 +200,7 @@ final class QueryPlanView: NSView {
         } else {
             setNote(nil, symbol: nil)
         }
+        diagramView.show(plan, analysis: analysis, metric: metric)
         outlineView.show(plan, analysis: analysis, metric: metric)
         setMode(mode)
     }
@@ -214,12 +233,17 @@ final class QueryPlanView: NSView {
         mode = outcome?.plan == nil ? .raw : newMode
         modePicker.selectedSegment = mode.rawValue
         split.isHidden = mode == .raw
-        rawScroll.isHidden = mode == .tree
-        metricPopup.isEnabled = mode == .tree
+        rawScroll.isHidden = mode != .raw
+        outlineView.isHidden = mode != .tree
+        diagramView.isHidden = mode != .diagram
+        if mode == .diagram { diagramView.viewDidBecomeVisible() }
+        metricPopup.isEnabled = mode != .raw
     }
 
     @objc private func modeChanged(_ sender: Any?) {
-        setMode(Mode(rawValue: modePicker.selectedSegment) ?? .tree)
+        let chosen = Mode(rawValue: modePicker.selectedSegment) ?? .diagram
+        Self.preferredMode = chosen
+        setMode(chosen)
     }
 
     @objc private func metricChanged(_ sender: Any?) {
@@ -231,6 +255,7 @@ final class QueryPlanView: NSView {
         guard analysis?.availableMetrics.contains(metric) == true else { return }
         metricPopup.selectItem(withTitle: metric.title)
         outlineView.metric = metric
+        diagramView.metric = metric
     }
 
     private func showDetails(of id: Int?) {

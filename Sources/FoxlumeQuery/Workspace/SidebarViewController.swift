@@ -25,6 +25,8 @@ final class SidebarViewController: NSViewController {
     var onOpenObject: ((SchemaObject) -> Void)?
     /// Copy Definition, Edit in Query Tab, Drop… or New Trigger… on an object or its group; see SidebarViewController+SchemaObjects.swift.
     var onObjectCommand: ((SchemaObjectCommand) -> Void)?
+    /// ER Diagram (nil, from the empty area) or Show in ER Diagram (a table); see WorkspaceWindowController+Diagram.swift.
+    var onShowERDiagram: ((TableRef?) -> Void)?
 
     private let filterField = NSSearchField()
     private let schemaPopup = NSPopUpButton()
@@ -378,6 +380,14 @@ final class SidebarViewController: NSViewController {
         if let table = menuTarget { onQueryTable?(table) }
     }
 
+    @objc private func menuShowInERDiagram(_ sender: Any?) {
+        if let table = menuTarget { onShowERDiagram?(table) }
+    }
+
+    @objc private func menuShowERDiagram(_ sender: Any?) {
+        onShowERDiagram?(nil)
+    }
+
     @objc private func menuCopyName(_ sender: Any?) {
         guard let table = menuTarget else { return }
         NSPasteboard.general.clearContents()
@@ -645,6 +655,9 @@ extension SidebarViewController: NSMenuDelegate {
             menu.addItem(item("Open in New Tab", #selector(menuOpenInNewTab(_:))))
             menu.addItem(item("Show Structure", #selector(menuStructure(_:))))
             menu.addItem(item("New Query for Table", #selector(menuQuery(_:))))
+            if onShowERDiagram != nil, workspace.supportsERDiagram {
+                menu.addItem(item("Show in ER Diagram", #selector(menuShowInERDiagram(_:))))
+            }
             menu.addItem(.separator())
             menu.addItem(item("Copy Name", #selector(menuCopyName(_:))))
             menu.addItem(item("Copy Definition (DDL)", #selector(menuCopyDDL(_:))))
@@ -686,6 +699,9 @@ extension SidebarViewController: NSMenuDelegate {
         }
         if onNewTable != nil, workspace.canChangeStructure {
             menu.addItem(item("New Table…", #selector(menuNewTable(_:))))
+        }
+        if menuTarget == nil, onShowERDiagram != nil, workspace.supportsERDiagram {
+            menu.addItem(item("ER Diagram", #selector(menuShowERDiagram(_:))))
         }
         menu.addItem(item("Refresh", #selector(menuRefresh(_:))))
     }

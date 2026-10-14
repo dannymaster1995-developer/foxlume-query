@@ -10,6 +10,7 @@ enum AppEnvironment {
     static let savedQueries = SavedQueryStore()
     static let filterPresets = FilterPresetStore()
     static let openQuicklyFrecency = QuickOpenFrecencyStore()
+    static let erDiagramLayouts = ERDiagramLayoutStore()
     static var settings: AppSettings {
         get { SettingsStore.shared.settings }
         set { SettingsStore.shared.settings = newValue }

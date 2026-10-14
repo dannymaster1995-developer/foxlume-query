@@ -61,11 +61,24 @@ they have had less testing and some features are missing.
   each step's object, share of the work, cost, estimated and actual rows, time and loops, expensive steps marked,
   warnings (row estimates far off, large filtered scans, sorts and hashes spilled to disk), every property of the
   selected step, and the server's raw output. PostgreSQL and MySQL; SQLite, DuckDB, MariaDB and MongoDB in beta.
+  The Diagram mode (the default) draws the plan as a tree of boxes coloured by each step's share of the work, with
+  cost, estimated and actual rows and time; it zooms (pinch, ⌘-scroll, ⌘= / ⌘-, Fit), shares its selection with
+  the tree and the detail pane, and exports as PNG or copies as an image (⌘C).
   Explain Analyze really runs the statement: on PostgreSQL inside a transaction that is rolled back, elsewhere only
   for statements that read data, and never for writes on read-only connections.
 - Confirmation before UPDATE or DELETE without WHERE, and before writes on Production connections (both can be turned off in Settings).
 - Open and save `.sql` files.
 - Saved queries (⌘D, or the star in a query tab): a "Saved Queries" side of the sidebar with nested folders, kept for one connection or shared with all of them. Each can have a keyword: typing it in the editor offers the query, and `;;` in its SQL marks where the cursor lands. Saved queries never run on their own; Run goes through the normal run path, Safe Mode included.
+
+**ER diagrams**
+- Database › ER Diagram, the sidebar's ER Diagram, or Show in ER Diagram on a table opens the schema (MySQL: the
+  database) as an entity-relationship diagram in a tab: tables with their columns, primary and foreign key markers
+  and types (Types and Keys Only switches), foreign key lines from column to column with crow's foot cardinality, and
+  related tables tinted and laid out together. PostgreSQL and MySQL read a whole schema in three catalog queries;
+  SQLite and DuckDB load table by table with progress.
+- Drag tables to arrange them (positions are remembered per connection and schema; Reset Layout forgets them), zoom
+  and pan as in the plan diagram, Find Table highlights matches, double-click opens a table's data, and the diagram
+  exports as PNG or PDF or copies as an image.
 
 **Everything else**
 - System, Light or Dark appearance; 13 built-in editor themes (Dracula, One Dark, Nord, Solarized, Catppuccin …) and import of VS Code themes (`.json` or `.vsix`).
@@ -73,7 +86,7 @@ they have had less testing and some features are missing.
 - Open Quickly (⇧⌘O): one fuzzy search over tables and views (all schemas), databases, schemas, procedures, functions, triggers and types, saved queries and recent history, with the tables, saved queries and history of the other open connections. Results rank by match and by how often and recently you opened them.
 - Open tabs come back when you reopen a connection; ⇧⌘T reopens a closed tab.
 
-**Not there yet:** SQL Server and many other engines, a graphical plan diagram, ER diagrams, JSON and XLSX import. MongoDB X.509 authentication, certificate revocation checks and SCRAM channel binding are not supported yet.
+**Not there yet:** SQL Server and many other engines, plan comparison, JSON and XLSX import. MongoDB X.509 authentication, certificate revocation checks and SCRAM channel binding are not supported yet.
 
 ## Building from source
 
@@ -118,7 +131,7 @@ port on 127.0.0.1 and skip otherwise. The credentials they use are local test va
 
 | Data | Location |
 |---|---|
-| Connections, settings, history, saved queries, filter presets, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
+| Connections, settings, history, saved queries, filter presets, ER diagram layouts, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
 | Database and SSH passwords, TLS key passphrases | macOS Keychain, service `com.foxlume.query.connection` |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder
@@ -135,6 +148,7 @@ Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords inc
 | ⌘. | Cancel query |
 | ⇧⌘L | Format SQL |
 | ⌥⌘E / ⌃⌘E | Explain / Explain Analyze |
+| ⌘= / ⌘- / ⌘C | Zoom in / zoom out / copy as image, in a focused plan or ER diagram |
 | ⌃Space | Show completions |
 | ⌘S | Save (staged truncates and drops, grid edits, or the SQL file) |
 | ⇧⌘P | Preview SQL |
@@ -175,10 +189,11 @@ Sources/
       Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/
     SQL/                dialects, statement splitting, query languages, table queries, change generation, formatter
     Completion/         query editor completion engines
-    Storage/            connections, Keychain, history, saved queries, filter presets, settings
+    Storage/            connections, Keychain, history, saved queries, filter presets, ER diagram layouts, settings
     Grid/               sort cycle and in-memory sort, paste parsing and placement, selection figures, cell filters
     Search/             Open Quickly matching, ranking and recency
-    Explain/            query plan model, parsers per engine, analysis and the Explain runner
+    Explain/            query plan model, parsers per engine, analysis, the Explain runner and the plan diagram layout
+    Diagram/            ER diagram graph (relationships, cardinality, groups) and layout
     Theme/              built-in themes, VS Code theme import
     Export/             result export, table export and SQL dumps
     Import/             CSV import, SQL file runner, text decoding

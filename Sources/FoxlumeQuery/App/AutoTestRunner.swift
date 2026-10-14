@@ -101,6 +101,8 @@ final class AutoTestRunner {
             try await performRoutines(command, argument)
         case _ where TLSAutoTest.commands.contains(command):
             try await performTLS(command, argument)
+        case _ where DiagramsAutoTest.commands.contains(command):
+            try await performDiagrams(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
             for window in NSApp.windows {

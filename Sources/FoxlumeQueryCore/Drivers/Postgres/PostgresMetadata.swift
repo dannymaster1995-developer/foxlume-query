@@ -214,7 +214,7 @@ extension PostgresConnection {
         return keys
     }
 
-    private static func referentialAction(_ code: String?) -> String? {
+    static func referentialAction(_ code: String?) -> String? {
         switch code {
         case "a": return "NO ACTION"
         case "r": return "RESTRICT"

@@ -7,7 +7,7 @@ import FoxlumeQueryCore
 ///     explainanalyze              Query › Explain Analyze (⌃⌘E); a Safe Mode question stays open for `confirm`
 ///     explainmenu                 logs whether both menu commands are enabled for the selected tab
 ///     planstate                   logs the result status, summary, note, visible columns and the outline rows
-///     planmode tree|raw           switches the plan view
+///     planmode diagram|tree|raw   switches the plan view
 ///     planmetric selfCost|selfTime
 ///     planselect 3                selects a step by its position in the plan (pre-order, root is 0)
 ///     plandetails                 logs the detail pane of the selected step
@@ -46,13 +46,13 @@ extension AutoTestRunner {
         case "planstate":
             record("  status: \(Self.statusText(in: query.view))")
             guard !plan.isHidden, query.explainOutcome != nil else { return record("  plan: not shown") }
-            record("  mode: \(plan.mode == .tree ? "tree" : "raw"); summary: \(plan.summary)")
+            record("  mode: \(plan.mode); summary: \(plan.summary)")
             if let note = plan.note { record("  note: \(note)") }
             record("  columns: " + plan.outlineView.visibleColumnTitles.joined(separator: " | "))
             for row in plan.outlineView.rowDescriptions { record("  | \(row)") }
             record("  selected: \(plan.outlineView.selectedNode.map { "#\($0.id) \($0.operation)" } ?? "none"); details: \(plan.detailView.title)")
         case "planmode":
-            plan.setMode(argument == "raw" ? .raw : .tree)
+            plan.setMode(argument == "raw" ? .raw : argument == "diagram" ? .diagram : .tree)
             try await Task.sleep(nanoseconds: 300_000_000)
         case "planmetric":
             guard let metric = QueryPlanMetric(rawValue: argument) else { throw DatabaseError.unsupported("planmetric selfCost|selfTime") }

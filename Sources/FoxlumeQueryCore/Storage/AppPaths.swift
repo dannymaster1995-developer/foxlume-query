@@ -39,6 +39,8 @@ public enum AppPaths {
     public static var filterPresetsFile: URL { dataDirectory.appendingPathComponent("filter-presets.json") }
     /// What Open Quickly remembers about recently chosen items, per connection.
     public static var openQuicklyFile: URL { dataDirectory.appendingPathComponent("open-quickly.json") }
+    /// Table positions arranged in ER diagrams, per connection, database and schema.
+    public static var erDiagramLayoutsFile: URL { dataDirectory.appendingPathComponent("er-diagram-layouts.json") }
     /// Host keys accepted for SSH tunnels, kept apart from the user's own ~/.ssh/known_hosts.
     public static var knownHostsFile: URL { dataDirectory.appendingPathComponent("known_hosts") }
     public static var portableCredentialsFile: URL { dataDirectory.appendingPathComponent("credentials.json") }
