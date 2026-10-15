@@ -9,6 +9,7 @@
 #             user md5user / md5pass (md5)
 # MySQL:      127.0.0.1:53306  user root / root (caching_sha2_password), db foxlume
 #             user native / nativepass (mysql_native_password)
+#             user fqauth / fqauthpass (created by the authentication-path tests in MySQLTests.swift)
 # MongoDB:    127.0.0.1:57017  auth enabled, TLS allowed (self-signed); users are created by the driver's seed step
 # Redis:      127.0.0.1:56379  default password redispass, ACL user easy / easypass
 set -euo pipefail
@@ -146,10 +147,8 @@ EOF
     "$REDIS/redis-cli" -p 56379 -a redispass --no-auth-warning ping >/dev/null 2>&1 && break
     sleep 0.2
   done
-  if [ ! -f "$REDISDATA/.seeded" ]; then
-    "$REDIS/redis-cli" -p 56379 -a redispass --no-auth-warning < "$SCRIPTS/seed-redis.txt" >/dev/null
-    touch "$REDISDATA/.seeded"
-  fi
+  # Redis keeps nothing on disk (save "", no AOF), so seed on every start; the seed begins with FLUSHALL.
+  "$REDIS/redis-cli" -p 56379 -a redispass --no-auth-warning < "$SCRIPTS/seed-redis.txt" >/dev/null
 }
 
 redis_running() { "$REDIS/redis-cli" -p 56379 -a redispass --no-auth-warning ping >/dev/null 2>&1; }

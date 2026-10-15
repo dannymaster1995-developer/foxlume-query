@@ -513,10 +513,22 @@ enum MySQLTestServer {
         return connection
     }
 
-    static func flushPrivileges() throws {
+    /// A caching_sha2 user that only the authentication-path tests log in with. Other suites log in as root in
+    /// parallel, and any such login refills root's cache entry between a flush and the check.
+    static let authUser = "fqauth"
+    static let authPassword = "fqauthpass"
+
+    /// Creates `authUser` if needed and empties the caching_sha2 cache, so its next login takes the full path.
+    static func resetAuthenticationCache() throws {
         let connection = try connect()
         defer { connection.close() }
+        _ = try connection.execute("CREATE USER IF NOT EXISTS '\(authUser)'@'%' IDENTIFIED WITH caching_sha2_password BY '\(authPassword)'", rowLimit: nil)
+        _ = try connection.execute("GRANT SELECT ON foxlume.* TO '\(authUser)'@'%'", rowLimit: nil)
         _ = try connection.execute("FLUSH PRIVILEGES", rowLimit: nil)
+    }
+
+    static func connectAsAuthUser(ssl: SSLMode) throws -> MySQLConnection {
+        try connect(user: authUser, password: authPassword, ssl: ssl)
     }
 }
 
@@ -614,21 +626,21 @@ struct MySQLLiveTests {
     }
 
     @Test func fullAuthenticationWithRSAWithoutTLS() throws {
-        try MySQLTestServer.flushPrivileges()
-        let first = try MySQLTestServer.connect(ssl: .disable)
+        try MySQLTestServer.resetAuthenticationCache()
+        let first = try MySQLTestServer.connectAsAuthUser(ssl: .disable)
         #expect(!first.isTLS)
         #expect(first.authenticationPath == .fullWithRSA)
-        #expect(try value(first, "SELECT CURRENT_USER()")?.textValue?.hasPrefix("root@") == true)
+        #expect(try value(first, "SELECT CURRENT_USER()")?.textValue?.hasPrefix("\(MySQLTestServer.authUser)@") == true)
         first.close()
 
-        let second = try MySQLTestServer.connect(ssl: .disable)
+        let second = try MySQLTestServer.connectAsAuthUser(ssl: .disable)
         defer { second.close() }
         #expect(second.authenticationPath == .cachedFastPath)
     }
 
     @Test func fullAuthenticationOverTLS() throws {
-        try MySQLTestServer.flushPrivileges()
-        let connection = try MySQLTestServer.connect(ssl: .require)
+        try MySQLTestServer.resetAuthenticationCache()
+        let connection = try MySQLTestServer.connectAsAuthUser(ssl: .require)
         defer { connection.close() }
         #expect(connection.isTLS)
         #expect(connection.authenticationPath == .fullOverTLS)
