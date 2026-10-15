@@ -1,8 +1,14 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+All notable changes to Foxlume Query are listed here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 First public version.
+
+### Added
 
 - Native drivers for PostgreSQL, MySQL, MariaDB, SQLite, DuckDB, MongoDB and Redis, with TLS and SSH tunnels.
 - Table, collection and key browsing with paging, filters, in-place editing, Preview SQL and transactional save.
@@ -22,3 +28,5 @@ First public version.
 - Foreign key navigation, Row Inspector, find in results, server-side row caps, create and drop databases and schemas.
 - Connection health checks with automatic reconnect.
 - Light, Dark and System appearance; built-in and VS Code editor themes.
+
+[Unreleased]: https://github.com/dannymaster1995-developer/foxlume-query/commits/main

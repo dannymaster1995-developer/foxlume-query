@@ -9,6 +9,8 @@ Thanks for helping. Bug reports, fixes and new features are all welcome.
 2. Run the app from the debug build with your own data folder so you never touch real connections:
    `FOXLUME_DATA_DIR=/tmp/fq-dev .build/debug/FoxlumeQuery`.
 3. Keep pull requests focused: one fix or feature per pull request, with tests.
+4. Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md), update the README when users will notice
+   the change, and mention the [ROADMAP.md](ROADMAP.md) task (`FQ-###`) if there is one.
 
 ## How the code is organized
 

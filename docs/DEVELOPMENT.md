@@ -36,6 +36,27 @@ Live suites run when a server answers on its port on 127.0.0.1, and skip otherwi
 
 The credentials are local test values (see `scripts/dbtest.sh` and the `scripts/seed-*` files). Never point the tests at a real server. `scripts/tls-test-certs.sh` creates the test CA, server and client certificates; they are never committed.
 
+`scripts/redis-extra.sh start` adds Redis Sentinel, Cluster and TLS servers for their suites. With every server running, use `fqtest --no-parallel`: in parallel, the live suites occupy all of Swift Testing's threads and the timing checks of the cancel and interrupt tests fail.
+
+## Making a change
+
+1. Pick or add a task in [ROADMAP.md](../ROADMAP.md) and mention its ID (`FQ-###`) in the commit or pull request.
+2. Add tests for the new behaviour; run the related suites with `fqtest --filter <Suite>` while you work and the whole suite before you finish.
+3. Add a line under `## [Unreleased]` in [CHANGELOG.md](../CHANGELOG.md), in the Added, Changed or Fixed group.
+4. Update the README when users would notice the change (Features, shortcuts, Install or FAQ).
+
+## Releases
+
+`VERSION` holds the current version; `scripts/build-app.sh` reads it. To release:
+
+```bash
+scripts/release.sh 0.2.0 --dry-run   # checks main is clean and shows the VERSION, CHANGELOG and README changes
+scripts/release.sh 0.2.0             # commits "Release 0.2.0" and tags v0.2.0 (no push)
+git push origin main && git push origin v0.2.0
+```
+
+The tag starts `.github/workflows/release.yml`: it runs the tests, builds the app, zips it with a SHA-256 checksum and publishes a GitHub release whose notes come from `scripts/release-notes.sh 0.2.0`. Versions follow [Semantic Versioning](https://semver.org); while the version starts with 0, new features raise the minor number and fixes the patch number.
+
 ## Command-line probe
 
 `fqprobe` exercises a driver without the app:

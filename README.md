@@ -27,7 +27,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **Free and open source** under the AGPL-3.0. Inspired by [TablePro](https://github.com/TableProApp/TablePro), and an open alternative to TablePlus, Sequel Ace and DBeaver for Mac users.
 
 > [!NOTE]
-> Foxlume Query is in **early alpha (0.1.0)**. There are no prebuilt downloads yet, so you [build it from source](#install) in a few minutes. Bug reports and ideas are very welcome.
+> Foxlume Query is in **early alpha (0.1.0)**. [Download the latest release](https://github.com/dannymaster1995-developer/foxlume-query/releases/latest) or [build it from source](#build-from-source) in a few minutes. Bug reports and ideas are very welcome.
 
 ## Features
 
@@ -102,6 +102,22 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 PostgreSQL and MySQL are the focus of the first releases. Beta engines work, but they have had less testing and some features are missing.
 
 ## Install
+
+### Download
+
+Requires macOS 13 or later on Apple silicon.
+
+1. Download `Foxlume-Query-<version>-arm64.zip` from the [latest release](https://github.com/dannymaster1995-developer/foxlume-query/releases/latest).
+2. Unzip it and move **Foxlume Query.app** to Applications.
+3. The app is signed ad hoc (no Apple Developer ID), so macOS blocks the first launch of a downloaded copy. Clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Foxlume Query.app"
+```
+
+Each release lists its changes and a SHA-256 checksum of the zip. All changes are in [CHANGELOG.md](CHANGELOG.md) and the plan is in [ROADMAP.md](ROADMAP.md).
+
+### Build from source
 
 **Requirements:** macOS 13 or later on Apple silicon, and Swift 6 (Xcode, or just the Command Line Tools: `xcode-select --install`).
 
@@ -178,7 +194,7 @@ The most used ones:
 <details>
 <summary><b>Is there a download?</b></summary>
 
-Not yet. Foxlume Query is in alpha, so you build it from source with the commands in [Install](#install). It takes a few minutes and needs no Apple developer account.
+Yes. Every release on the [releases page](https://github.com/dannymaster1995-developer/foxlume-query/releases/latest) has a zip of the app for Apple silicon; see [Install](#download) for the one-time quarantine step. You can also [build it from source](#build-from-source) in a few minutes, with no Apple developer account.
 </details>
 
 <details>

@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 source scripts/env.sh
 [ -f Vendor/duckdb/libduckdb.dylib ] || scripts/fetch-duckdb.sh
 
-VERSION="${FOXLUME_VERSION:-0.1.0}"
+VERSION="${FOXLUME_VERSION:-$(cat VERSION)}"
 BUILD_NUMBER="${FOXLUME_BUILD:-1}"
 CONFIGURATION="${1:-release}"
 
