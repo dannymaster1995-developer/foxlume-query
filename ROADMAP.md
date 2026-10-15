@@ -59,8 +59,8 @@ Navigation and safety:
 - [ ] FQ-116 Toolbar tinted with the connection's environment colour
 
 Quality and release:
-- [ ] FQ-117 Server version matrix in the live tests: PostgreSQL 13 to 17, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4
-- [ ] FQ-118 UI autotest scripts that walk every PostgreSQL and MySQL feature against the local servers
+- [ ] FQ-117 Server version matrix on GitHub Actions (on release tags, weekly and on demand): PostgreSQL 13 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4
+- [ ] FQ-118 UI autotest scripts that walk every PostgreSQL and MySQL feature against the local servers; the whole set runs before each release
 - [ ] FQ-119 Publish v0.1.0 on GitHub Releases with a downloadable app
 
 ## v0.2.0: more databases, most used first
