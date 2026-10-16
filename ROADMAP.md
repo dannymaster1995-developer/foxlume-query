@@ -33,7 +33,7 @@ Done:
 - [x] FQ-017 Release process: VERSION file, Keep a Changelog, release script and workflow, ROADMAP
 
 Data grid:
-- [ ] FQ-101 Set Value: DEFAULT and NOW() in the cell menu
+- [x] FQ-101 Set Value: DEFAULT and NOW() in the cell menu
 - [ ] FQ-102 Copy rows as an IN list or as UPDATE statements
 - [ ] FQ-103 Columns: hide and show, jump to column, size to fit, remembered layout
 - [ ] FQ-104 Cell editors: date and time picker, enum list, boolean toggle, foreign key value picker

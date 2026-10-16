@@ -12,6 +12,15 @@ private final class GridRecorder: DataGridViewDelegate {
     func dataGridSelectionDidChange(_ grid: DataGridView) { selectionChanges += 1 }
 }
 
+/// The titles of a cell menu built for `row` / data column `column`, as a right-click would build it.
+@MainActor
+private func cellMenu(_ grid: DataGridView, row: Int, column: Int) -> NSMenu {
+    let tableColumn = grid.tableView.tableColumns.firstIndex { $0.identifier.rawValue == "c\(column)" } ?? -1
+    let menu = NSMenu()
+    grid.populateContextMenu(menu, row: row, tableColumn: tableColumn)
+    return menu
+}
+
 private func scratchDatabase(_ name: String) -> URL {
     let directory = ProcessInfo.processInfo.environment["TMPDIR"].map { URL(fileURLWithPath: $0, isDirectory: true) } ?? FileManager.default.temporaryDirectory
     return directory.appendingPathComponent("\(name)-\(UUID().uuidString).sqlite")
@@ -101,6 +110,32 @@ extension AppCompletionTests {
             grid.selectRow(2)
             #expect(grid.cellSelection.isEmpty)
             #expect(grid.selectedRows == IndexSet(integer: 2))
+        }
+
+        /// Set Value holds NULL and Empty String everywhere, DEFAULT on SQL engines but SQLite, and the current
+        /// timestamp on SQL engines; read-only grids have no Set Value.
+        @Test func setValueMenuPerEngineKind() {
+            for kind in DatabaseKind.allCases {
+                let grid = DataGridView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+                grid.setContent(DataGridContent(columns: [ResultColumn(name: "id", typeName: "int4", isNumeric: true), ResultColumn(name: "name", typeName: "text")], rows: [[.text("1"), .text("a")]]))
+                grid.allowValueKeywords(for: kind)
+                grid.isEditable = true
+                let menu = cellMenu(grid, row: 0, column: 1)
+                let titles = menu.items.map(\.title)
+                let values = menu.items.first { $0.title == "Set Value" }?.submenu?.items.map(\.title)
+                var expected = ["NULL", "Empty String"]
+                if kind.isSQL && kind != .sqlite { expected.append("DEFAULT") }
+                if kind.isSQL { expected.append("Current Timestamp (NOW())") }
+                #expect(values == expected, "\(kind)")
+                #expect(!titles.contains { $0.hasPrefix("Set ") && $0 != "Set Value" }, "\(kind): the old flat items are gone")
+                if let index = titles.firstIndex(of: "Set Value") {
+                    #expect(titles[index + 1] == "Fill Cell…", "\(kind): Fill stays right below Set Value")
+                }
+                #expect(titles.contains("Delete Row"))
+
+                grid.isEditable = false
+                #expect(!cellMenu(grid, row: 0, column: 1).items.contains { $0.title == "Set Value" }, "\(kind): read-only grids offer no Set Value")
+            }
         }
 
         @Test func localSortCyclesThroughSeveralKeys() {
@@ -201,6 +236,34 @@ extension AppCompletionTests {
             grid.pasteText("x")
             #expect(grid.lastRefusal == "This connection is read-only.")
             #expect(grid.content.changes.isEmpty)
+        }
+
+        @Test func setValueSubmenuEditsTheSelectedCellsAsOneStep() async throws {
+            let (tab, workspace, url) = try await makeTab()
+            defer { Task { await tearDown(workspace, url) } }
+            let grid = tab.grid
+            func choose(_ title: String, row: Int, column: Int) throws {
+                let menu = cellMenu(grid, row: row, column: column)
+                let item = try #require(menu.items.first { $0.title == "Set Value" }?.submenu?.items.first { $0.title == title })
+                _ = (item.target as AnyObject).perform(try #require(item.action), with: item)
+                grid.menuDidClose(menu)
+            }
+            #expect(cellMenu(grid, row: 0, column: 1).items.first { $0.title == "Set Value" }?.submenu?.items.map(\.title) == ["NULL", "Empty String", "Current Timestamp (NOW())"], "SQLite has no DEFAULT keyword")
+
+            grid.selectCells(rows: 0...2, columns: 1...2)
+            try choose("NULL", row: 1, column: 2)
+            #expect(grid.content.changes.changeCount == 6)
+            #expect(grid.content.changes.value(row: 2, column: 1) == .null)
+            tab.undo(nil)
+            #expect(grid.content.changes.isEmpty, "one undo step takes back every cell")
+
+            grid.selectCells(rows: 0...0, columns: 1...1)
+            try choose("Empty String", row: 0, column: 1)
+            #expect(grid.content.changes.value(row: 0, column: 1) == .text(""))
+            grid.selectCells(rows: 1...1, columns: 1...1)
+            try choose("Current Timestamp (NOW())", row: 1, column: 1)
+            #expect(grid.content.changes.value(row: 1, column: 1) == .expression("CURRENT_TIMESTAMP"))
+            #expect(tab.previewOfPendingChanges()?.contains("SET \"name\" = CURRENT_TIMESTAMP WHERE \"id\" = '2'") == true)
         }
 
         @Test func rangeEditsAreOneStepAndSortRunsOnTheServer() async throws {

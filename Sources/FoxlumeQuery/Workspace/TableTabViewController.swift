@@ -142,9 +142,8 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         grid.allowsColumnSort = workspace.capabilities.supportsColumnSort
         if case .columns = workspace.capabilities.browseFilterStyle { grid.allowsColumnFilter = true }
         grid.immutableColumns = workspace.capabilities.immutableColumns
-        grid.allowsSQLExpressions = workspace.kind.isSQL
+        grid.allowValueKeywords(for: workspace.kind)
         grid.allowsServerSearch = workspace.kind.isSQL
-        grid.allowsDefaultKeyword = workspace.kind.isSQL && workspace.kind != .sqlite
         grid.isEditable = canEdit
         grid.readOnlyReason = readOnlyReason
         grid.tableNameForCopy = table.name

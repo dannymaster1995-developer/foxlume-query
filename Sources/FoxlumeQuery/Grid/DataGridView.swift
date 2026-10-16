@@ -131,6 +131,12 @@ final class DataGridView: NSView {
     /// The DEFAULT keyword works in UPDATE and INSERT on every SQL engine except SQLite.
     var allowsDefaultKeyword = false
 
+    /// Offers the Set Value keywords a table of `kind` accepts.
+    func allowValueKeywords(for kind: DatabaseKind) {
+        allowsSQLExpressions = kind.isSQL
+        allowsDefaultKeyword = kind.isSQL && kind != .sqlite
+    }
+
     /// The cell and rows a context menu was opened on. Menu commands act on these; keyboard commands use the selection.
     private(set) var contextCell: (row: Int, tableColumn: Int)?
     private(set) var contextRows: IndexSet?
@@ -659,14 +665,21 @@ extension DataGridView: NSMenuDelegate {
 
         if isEditable {
             menu.addItem(.separator())
-            menu.addItem(item("Set NULL", #selector(setNull(_:))))
-            menu.addItem(item("Set Empty String", #selector(setEmpty(_:))))
+            let setValue = NSMenuItem(title: "Set Value", action: nil, keyEquivalent: "")
+            let values = NSMenu()
+            values.addItem(item("NULL", #selector(setNull(_:))))
+            values.addItem(item("Empty String", #selector(setEmpty(_:))))
             if allowsDefaultKeyword {
-                menu.addItem(item("Set DEFAULT", #selector(setDefault(_:))))
+                values.addItem(item("DEFAULT", #selector(setDefault(_:))))
             }
             if allowsSQLExpressions {
-                menu.addItem(item("Set Current Timestamp", #selector(setCurrentTimestamp(_:))))
+                // Named after NOW() so it is easy to find; CURRENT_TIMESTAMP is what every SQL engine accepts.
+                let now = item("Current Timestamp (NOW())", #selector(setCurrentTimestamp(_:)))
+                now.toolTip = "Writes CURRENT_TIMESTAMP, which PostgreSQL, MySQL, SQLite and DuckDB all accept."
+                values.addItem(now)
             }
+            setValue.submenu = values
+            menu.addItem(setValue)
             menu.addItem(item(cellSelection.cellCount > 1 && contextCellIsSelected ? "Fill Selected Cells…" : "Fill Cell…", #selector(fillSelectedCells(_:))))
             menu.addItem(.separator())
             let allDeleted = rows.allSatisfy { content.changes.deletions.contains($0) }
