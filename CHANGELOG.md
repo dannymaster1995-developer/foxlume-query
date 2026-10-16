@@ -30,4 +30,8 @@ First public version.
 - Connection health checks with automatic reconnect.
 - Light, Dark and System appearance; built-in and VS Code editor themes.
 
+### Fixed
+
+- Opening many tabs no longer widens the workspace window past the screen. The tab strip shows as many tabs as fit (more or fewer as the window is resized), always including the selected tab and the most recently used ones; a "+N" button after them lists the hidden tabs, and choosing one brings it into view. A workspace window that would open larger than the screen is fitted to it.
+
 [Unreleased]: https://github.com/dannymaster1995-developer/foxlume-query/commits/main

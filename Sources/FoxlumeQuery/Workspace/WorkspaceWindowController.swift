@@ -120,6 +120,25 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) is not supported")
     }
 
+    // MARK: Frame
+
+    /// `frame` moved and, when larger, shrunk to lie inside `visible` (a screen's visible frame).
+    static func clamped(_ frame: NSRect, to visible: NSRect) -> NSRect {
+        var result = frame
+        result.size.width = min(frame.width, visible.width)
+        result.size.height = min(frame.height, visible.height)
+        result.origin.x = min(max(frame.minX, visible.minX), visible.maxX - result.width)
+        result.origin.y = min(max(frame.minY, visible.minY), visible.maxY - result.height)
+        return result
+    }
+
+    /// Keeps the window on its screen, as it comes up with its restored tabs.
+    func clampToScreen() {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let frame = Self.clamped(window.frame, to: screen.visibleFrame)
+        if frame != window.frame { window.setFrame(frame, display: true) }
+    }
+
     // MARK: Toolbar
 
     private func configureToolbar() {

@@ -30,7 +30,10 @@ final class TabsViewController: NSViewController {
     let workspace: ConnectionWorkspace
     private(set) var tabs: [WorkspaceTab] = []
     private(set) var selectedTab: WorkspaceTab?
-    private let strip = TabStripView()
+    /// The tab strip; it shows the tabs that fit and lists the rest behind "+N".
+    let strip = TabStripView()
+    /// The window's tabs, most recently selected first, which decides the ones the strip keeps in view.
+    private var recency = TabRecency<UUID>()
     private let container = NSView()
     private let emptyState = NSStackView()
     private var queryCounter = 0
@@ -114,6 +117,7 @@ final class TabsViewController: NSViewController {
             let old = tabs[preview]
             let tab = WorkspaceTab(content: controller, isPreview: true)
             tabs[preview] = tab
+            recency.remove(old.id)
             detach(old)
             install(tab)
             select(id: tab.id)
@@ -202,6 +206,7 @@ final class TabsViewController: NSViewController {
             selectedTab = tab
             container.addSubviewFilling(tab.content.view)
         }
+        recency.use(tab.id)
         emptyState.isHidden = true
         refreshStrip()
         onSelectionChange?(tab)
@@ -243,6 +248,7 @@ final class TabsViewController: NSViewController {
     private func remove(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         let tab = tabs.remove(at: index)
+        recency.remove(tab.id)
         if let query = tab.content as? QueryTabViewController {
             closedTabs.append((nil, query.sql, query.tabTitle, query.fileURL))
         } else if let table = tab.table {
@@ -392,7 +398,7 @@ final class TabsViewController: NSViewController {
         let items = tabs.map {
             TabStripItem(id: $0.id, title: $0.content.tabTitle, symbol: $0.content.tabSymbol, isDirty: $0.content.hasUnsavedChanges, isPreview: $0.isPreview)
         }
-        strip.update(items: items, selectedID: selectedTab?.id)
+        strip.update(items: items, selectedID: selectedTab?.id, recency: recency.ids)
         if let selectedTab, selectedTab.content.hasUnsavedChanges, selectedTab.isPreview {
             selectedTab.isPreview = false
             refreshStrip()

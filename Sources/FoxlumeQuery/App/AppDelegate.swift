@@ -292,6 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 workspaces.append(controller)
                 controller.tabs.restoreState()
+                controller.clampToScreen()
                 controller.showWindow(nil)
                 controller.window?.makeKeyAndOrderFront(nil)
                 welcome?.window?.orderOut(nil)

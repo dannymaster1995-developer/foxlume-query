@@ -94,6 +94,7 @@ Sources/
     Grid/               sorting, paste parsing, selection figures, cell filters, column name matching, cell editor types,
                         value viewer helpers (view modes, JSON tree and paths, image signatures, hex dump lines)
     Search/             Open Quickly matching and ranking
+    Tabs/               tab strip layout: how many tabs fit and which stay in view
     Explain/            query plan model, parsers per engine, analysis, plan diagram layout
     Diagram/            ER diagram graph and layout
     Theme/              built-in themes, VS Code theme import
