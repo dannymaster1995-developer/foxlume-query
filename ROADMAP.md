@@ -5,8 +5,8 @@ pull requests can refer to. A task is ticked when it is merged with tests, a CHA
 Shipped changes are listed in [CHANGELOG.md](CHANGELOG.md); ideas and bugs are welcome as
 [issues](https://github.com/dannymaster1995-developer/foxlume-query/issues).
 
-The order: first PostgreSQL and MySQL complete and solid, then more databases (most used first), then AI and
-MCP, then advanced connection setups.
+The order: first PostgreSQL and MySQL complete and solid, with inline AI suggestions in the editor, then more
+databases (most used first), then the AI assistant and MCP, then advanced connection setups.
 
 ## v0.1.0: PostgreSQL and MySQL, complete (current)
 
@@ -58,6 +58,10 @@ Navigation and safety:
 - [ ] FQ-115 Recent and favourite tables in the sidebar
 - [ ] FQ-116 Toolbar tinted with the connection's environment colour
 
+AI in the editor (off by default; nothing leaves the Mac unless the user turns it on):
+- [ ] FQ-120 Inline suggestions: grey ghost text after the caret from an AI provider (OpenAI-compatible, including Ollama and other local models, and Claude), with the schema as context; Tab accepts, Esc dismisses; API keys in the Keychain
+- [ ] FQ-121 GitHub Copilot as a source of inline suggestions: Sign in with GitHub in Settings, the Copilot language server downloaded on first use at a pinned version and checksum, telemetry off by default
+
 Quality and release:
 - [ ] FQ-117 Server version matrix on GitHub Actions (on release tags, weekly and on demand): PostgreSQL 13 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4
 - [ ] FQ-118 UI autotest scripts that walk every PostgreSQL and MySQL feature against the local servers; the whole set runs before each release
@@ -82,7 +86,7 @@ Bring the beta engines up to the same standard, then add new engines in order of
 
 Off by default; nothing leaves the Mac unless the user turns it on and picks a provider.
 
-- [ ] FQ-301 AI assistant: explain, fix and write queries with the schema as context; any provider, including local models
+- [ ] FQ-301 AI assistant: explain, fix and write queries with the schema as context; any provider, including local models (builds on the providers from FQ-120)
 - [ ] FQ-302 Chat modes Ask, Edit and Agent; every statement still goes through Safe Mode
 - [ ] FQ-303 MCP server on localhost for Claude Code, Cursor and other clients: read-only by default, never exposes passwords
 
