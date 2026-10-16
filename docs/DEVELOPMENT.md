@@ -72,7 +72,7 @@ Run it without arguments for every option, including SSH and TLS settings.
 
 | Data | Location |
 |---|---|
-| Connections, settings, history, saved queries, filter presets, ER diagram layouts, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
+| Connections, settings, history, saved queries, filter presets, ER diagram layouts, grid column layouts, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
 | Database and SSH passwords, TLS key passphrases | macOS Keychain, service `com.foxlume.query.connection` |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder (passwords in a file readable only by you). `scripts/run-portable.sh` starts the app this way.
@@ -90,8 +90,8 @@ Sources/
       Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/
     SQL/                dialects, statement splitting, table queries, change generation, formatter
     Completion/         query editor completion engines
-    Storage/            connections, Keychain, history, saved queries, filter presets, diagram layouts, settings
-    Grid/               sorting, paste parsing, selection figures, cell filters
+    Storage/            connections, Keychain, history, saved queries, filter presets, diagram and column layouts, settings
+    Grid/               sorting, paste parsing, selection figures, cell filters, column name matching
     Search/             Open Quickly matching and ranking
     Explain/            query plan model, parsers per engine, analysis, plan diagram layout
     Diagram/            ER diagram graph and layout

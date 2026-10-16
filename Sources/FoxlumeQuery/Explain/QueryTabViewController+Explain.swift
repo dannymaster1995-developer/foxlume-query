@@ -87,6 +87,8 @@ extension QueryTabViewController: NSMenuItemValidation {
         case #selector(explainAnalyzeQuery(_:)):
             menuItem.toolTip = workspace.explainAvailability.analyzeNote
             return canExplain(.analyze)
+        case #selector(jumpToColumn(_:)):
+            return canJumpToColumn
         default:
             return true
         }

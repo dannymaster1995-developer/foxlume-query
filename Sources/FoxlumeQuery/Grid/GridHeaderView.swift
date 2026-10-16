@@ -2,7 +2,8 @@ import AppKit
 import FoxlumeQueryCore
 
 /// Column header of the data grid. A click sorts and a Shift-click adds a sort key (TablePro's cycle, see `SortCycle`),
-/// a ⌘-click selects the column; drags still reorder and the divider still resizes.
+/// a ⌘-click selects the column; drags still reorder and the divider still resizes (a double-click on it sizes the
+/// column to fit). A reorder or resize is reported to the grid once the mouse is released.
 final class GridHeaderView: NSTableHeaderView {
     weak var grid: DataGridView?
 
@@ -14,14 +15,15 @@ final class GridHeaderView: NSTableHeaderView {
         guard let grid, let tableView else { return super.mouseDown(with: event) }
         let point = convert(event.locationInWindow, from: nil)
         let index = column(at: point)
-        guard index >= 0, let dataColumn = grid.dataColumnIndex(atTableColumn: index), !isInResizeZone(point) else {
-            return super.mouseDown(with: event)
-        }
+        let clickedColumn = index >= 0 && !isInResizeZone(point) ? grid.dataColumnIndex(atTableColumn: index) : nil
         let order = tableView.tableColumns.map(\.identifier)
         let widths = tableView.tableColumns.map(\.width)
         super.mouseDown(with: event)
         // AppKit ran its own tracking loop: a reorder or resize changed the columns, a drag moved the pointer.
-        guard tableView.tableColumns.map(\.identifier) == order, tableView.tableColumns.map(\.width) == widths else { return }
+        guard tableView.tableColumns.map(\.identifier) == order, tableView.tableColumns.map(\.width) == widths else {
+            return grid.columnLayoutDidChange()
+        }
+        guard let dataColumn = clickedColumn else { return }
         if let release = NSApp.currentEvent, release.type == .leftMouseUp {
             let up = release.locationInWindow
             let down = event.locationInWindow
@@ -47,7 +49,8 @@ final class GridHeaderView: NSTableHeaderView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         let index = column(at: point)
-        guard let grid, index >= 0, let dataColumn = grid.dataColumnIndex(atTableColumn: index) else { return nil }
+        guard let grid else { return nil }
+        guard index >= 0, let dataColumn = grid.dataColumnIndex(atTableColumn: index) else { return grid.headerMenuWithoutColumn() }
         return grid.headerMenu(forDataColumn: dataColumn)
     }
 }

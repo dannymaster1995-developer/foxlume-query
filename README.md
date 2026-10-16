@@ -44,6 +44,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 
 - **A fast grid** with server-side paging, sorting on several columns (Shift-click) and filters: between, regex, IN, match case, and saved presets.
 - **Spreadsheet-style editing:** select ranges, copy as TSV, paste from Excel or CSV, fill a column, set cells to NULL, an empty string, DEFAULT or the current timestamp (Set Value in the cell menu), see sum and average of the selection. Copy rows as CSV, JSON, Markdown, SQL INSERT or UPDATE statements, or a column's values as an `IN (…)` list. Every change waits for ⌘S, and Preview SQL (⇧⌘P) shows exactly what will run.
+- **Arrange columns:** drag to reorder, hide columns or pick them from a checklist, size them to fit (or double-click a divider), and jump to a column by typing its name (⌃⌘J). Each table remembers its column order, widths and hidden columns.
 - **Follow foreign keys** with one click, inspect a row in the Row Inspector (⌥⌘I), and find text in results or across the whole table.
 
 ### Understand your queries
@@ -169,6 +170,7 @@ The most used ones:
 | ⇧⌘F | Filter rows |
 | ⌘F / ⌘G / ⇧⌘G | Find in results / next / previous match |
 | ⌥⌘I | Row Inspector |
+| ⌃⌘J | Jump to column |
 | ⌘[ / ⌘] | Previous / next page |
 | ⌥⌘↑ / ⌥⌘↓ | First / last page |
 | ⌘R / ⇧⌘R | Reload data / reload table list |

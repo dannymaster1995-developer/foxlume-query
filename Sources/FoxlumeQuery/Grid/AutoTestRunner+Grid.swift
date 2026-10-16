@@ -24,17 +24,30 @@ import FoxlumeQueryCore
 ///     filterlogic and|or                how the rules combine, then applies
 ///     presetsave <name> / presetapply <name> / presetdelete <name> / presetlist   filter presets of the table
 ///     deleteselected / duplicateselected   the row commands on the selected rows
+///     columnlayout                      logs the columns in on-screen order with their widths and hidden ones
+///     headeraction <column> <title>     chooses an item of that column's header menu (Hide Column, Size Column to Fit, …)
+///     showcolumn <column>|all           shows a hidden column (or all) as the Columns list does
+///     resizecolumn <column> <width>     a drag of the header divider
+///     movecolumn <column> <position>    a drag of the header to a position among the data columns (from 0)
+///     jumpcolumn <text>                 ⌃⌘J, types the text, logs the matches and presses Return
+///     columnslist [<text>]|close        opens the Columns list (filtered by the text) and logs it, or closes it
+///     closetab                          closes the selected tab
 @MainActor
 enum GridAutoTest {
     static let commands: Set<String> = [
         "gridstate", "sortclick", "sortmenu", "headermenu", "selectcells", "cmdclick", "selectcolumn", "cellkey", "copycells",
         "pastetext", "cellmenu", "cellfilter", "fillcells", "fillcolumn", "fillvalue", "filteradd", "filterlogic",
         "presetsave", "presetapply", "presetdelete", "presetlist", "deleteselected", "duplicateselected",
+        "columnlayout", "headeraction", "showcolumn", "resizecolumn", "movecolumn", "jumpcolumn", "columnslist", "closetab",
     ]
 }
 
 extension AutoTestRunner {
     func performGrid(_ command: String, _ argument: String) async throws {
+        if command == "closetab" {
+            workspace?.tabs.closeSelected()
+            return try await Task.sleep(nanoseconds: 300_000_000)
+        }
         let words = argument.split(separator: " ").map(String.init)
         let tableTab = workspace?.tabs.selectedTab?.content as? TableTabViewController
         guard let grid = tableTab?.grid ?? (workspace?.tabs.selectedTab?.content as? QueryTabViewController)?.grid else {
@@ -160,6 +173,54 @@ extension AutoTestRunner {
             default:
                 record("  presets: " + saved.map { "\($0.name) [\($0.rules.map(\.summary).joined(separator: "; "))\($0.logic == .or ? " (any)" : "")]" }.joined(separator: ", "))
             }
+        case "columnlayout":
+            logColumnLayout(grid)
+        case "headeraction":
+            let pieces = argument.split(separator: " ", maxSplits: 1).map(String.init)
+            guard pieces.count == 2, let menu = grid.headerMenu(forDataColumn: try column(pieces[0])) else {
+                throw DatabaseError.unsupported("headeraction <column> <title>")
+            }
+            guard let item = menu.items.first(where: { $0.title == pieces[1] }), let action = item.action else {
+                throw DatabaseError.unsupported("No enabled \(pieces[1]) in the header menu")
+            }
+            NSApp.sendAction(action, to: item.target, from: item)
+            try await Task.sleep(nanoseconds: 300_000_000)
+        case "showcolumn":
+            if argument == "all" { grid.showAllColumns() } else { grid.setColumn(try column(argument), hidden: false) }
+        case "resizecolumn":
+            guard words.count == 2, let width = Double(words[1]), let tableColumn = grid.tableColumn(forDataColumn: try column(words[0])) else {
+                throw DatabaseError.unsupported("resizecolumn <column> <width>")
+            }
+            tableColumn.width = CGFloat(width)
+            grid.columnLayoutDidChange()
+        case "movecolumn":
+            guard words.count == 2, let position = Int(words[1]), let tableColumn = grid.tableColumn(forDataColumn: try column(words[0])),
+                  let from = grid.tableView.tableColumns.firstIndex(of: tableColumn) else {
+                throw DatabaseError.unsupported("movecolumn <column> <position>")
+            }
+            // The row number column comes first; data positions count after it.
+            grid.tableView.moveColumn(from, toColumn: min(position + 1, grid.tableView.numberOfColumns - 1))
+            grid.columnLayoutDidChange()
+        case "jumpcolumn":
+            grid.showJumpToColumn()
+            guard let picker = grid.columnPicker, picker.mode == .jump else { throw DatabaseError.unsupported("No Jump to Column field") }
+            picker.filter(argument)
+            try await Task.sleep(nanoseconds: 300_000_000)
+            record("  matches: " + picker.visibleTitles.joined(separator: ", "))
+            picker.chooseSelected()
+            try await Task.sleep(nanoseconds: 300_000_000)
+            let active = grid.cellSelection.active.flatMap { cell in grid.dataColumn(atDisplayPosition: cell.column).map { "row \(cell.row) \(grid.content.columns[$0].name)" } }
+            record("  active cell: " + (active ?? "none"))
+        case "columnslist":
+            if argument == "close" {
+                grid.columnPicker?.close()
+            } else {
+                grid.showColumnsList()
+                guard let picker = grid.columnPicker else { throw DatabaseError.unsupported("No Columns list") }
+                picker.filter(argument)
+                try await Task.sleep(nanoseconds: 300_000_000)
+                record("  list: " + picker.visibleTitles.joined(separator: ", "))
+            }
         case "deleteselected":
             tableTab?.deleteSelectedRows(nil)
         case "duplicateselected":
@@ -210,6 +271,18 @@ extension AutoTestRunner {
             record("  status: " + Self.label("queryStatus", in: query.view) + " | selection: " + Self.label("querySelectionSummary", in: query.view))
         }
         if let refusal = grid.lastRefusal { record("  last refusal: " + refusal) }
+    }
+
+    /// `id 60 | status 120 hidden | …` in on-screen order, then what is stored for a table tab.
+    private func logColumnLayout(_ grid: DataGridView) {
+        func describe(_ layout: GridColumnLayout) -> String {
+            layout.columns.map { "\($0.name) \($0.width.map { String(Int($0.rounded())) } ?? "auto")\($0.isHidden ? " hidden" : "")" }.joined(separator: " | ")
+        }
+        record("  columns: " + describe(grid.columnLayout))
+        record("  shown: " + grid.displayedDataColumns.map { grid.content.columns[$0].name }.joined(separator: ", "))
+        if let tableTab = workspace?.tabs.selectedTab?.content as? TableTabViewController {
+            record("  saved: " + (tableTab.columnLayouts.layout(for: tableTab.columnLayoutScope).map(describe) ?? "none"))
+        }
     }
 
     private static func label(_ identifier: String, in view: NSView) -> String {

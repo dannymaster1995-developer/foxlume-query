@@ -41,6 +41,27 @@ extension TableTabViewController {
         showFilters(adding: FilterRule(column: name, op: .equals))
     }
 
+    // MARK: Column layout
+
+    /// The table's remembered column order, widths and hidden columns, given to the grid when it builds its columns.
+    func dataGridSavedColumnLayout(_ grid: DataGridView) -> GridColumnLayout? {
+        columnLayouts.layout(for: columnLayoutScope)
+    }
+
+    func dataGrid(_ grid: DataGridView, didChangeColumnLayout layout: GridColumnLayout?) {
+        if let layout {
+            try? columnLayouts.setLayout(layout, for: columnLayoutScope)
+        } else {
+            try? columnLayouts.clear(columnLayoutScope)
+        }
+    }
+
+    /// ⌃⌘J.
+    @objc func jumpToColumn(_ sender: Any?) {
+        guard mode == .data else { return NSSound.beep() }
+        grid.showJumpToColumn()
+    }
+
     // MARK: Filter submenu
 
     /// "Filter" in a cell's menu: conditions that keep the clicked row, as TablePro offers them.

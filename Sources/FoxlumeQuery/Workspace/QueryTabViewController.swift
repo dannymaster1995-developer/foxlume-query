@@ -583,6 +583,14 @@ extension QueryTabViewController: DataGridViewDelegate {
     func dataGridSelectionDidChange(_ grid: DataGridView) {
         selectionLabel.stringValue = grid.selectionStatistics?.summary ?? ""
     }
+
+    /// ⌃⌘J on the results; their column layout is not remembered.
+    @objc func jumpToColumn(_ sender: Any?) {
+        guard canJumpToColumn else { return NSSound.beep() }
+        grid.showJumpToColumn()
+    }
+
+    var canJumpToColumn: Bool { !grid.isHidden && !grid.content.columns.isEmpty }
 }
 
 extension QueryTabViewController: SQLCompletionProvider {

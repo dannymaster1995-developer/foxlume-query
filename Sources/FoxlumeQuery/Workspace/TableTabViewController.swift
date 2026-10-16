@@ -15,7 +15,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     /// Opens a table filtered to the rows a foreign key points at.
     var onOpenReference: ((TableRef, [FilterRule]) -> Void)?
 
-    private var mode: Mode
+    private(set) var mode: Mode
     private var query: TableQuery
     private(set) var structure: TableStructure?
     private var totalRows: Int?
@@ -28,6 +28,11 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     }
     /// The database this tab's rows came from; MySQL table refs carry no database name.
     private let openedDatabase: String?
+    /// Where the grid's column order, widths and hidden columns are remembered.
+    let columnLayouts: GridColumnLayoutStore
+    var columnLayoutScope: GridColumnLayoutScope {
+        GridColumnLayoutScope(connectionID: workspace.config.id, database: openedDatabase, schema: table.schema, table: table.name)
+    }
 
     let grid = DataGridView()
     private let inspector = RowInspectorView()
@@ -82,8 +87,10 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     static let maximumPageSize = 1_000_000
     private lazy var refreshButton = UI.iconButton("arrow.clockwise", tooltip: "Refresh (⌘R)", target: self, action: #selector(refreshData(_:)))
 
-    init(workspace: ConnectionWorkspace, table: TableRef, initialMode: Mode = .data, initialFilters: [FilterRule] = []) {
+    init(workspace: ConnectionWorkspace, table: TableRef, initialMode: Mode = .data, initialFilters: [FilterRule] = [],
+         columnLayouts: GridColumnLayoutStore? = nil) {
         self.workspace = workspace
+        self.columnLayouts = columnLayouts ?? AppEnvironment.gridColumnLayouts
         self.table = table
         self.mode = initialMode
         self.query = TableQuery(table: table, pageSize: workspace.capabilities.preferredPageSize ?? AppEnvironment.settings.rowsPerPage)
@@ -619,7 +626,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         commit(changes, action: "Add Row")
         let row = grid.content.displayRowCount - 1
         grid.scrollToRow(row)
-        DispatchQueue.main.async { self.grid.beginEditing(row: row, tableColumn: 1) }
+        DispatchQueue.main.async { self.grid.beginEditing(row: row, tableColumn: self.grid.firstVisibleTableColumn ?? 1) }
     }
 
     @objc func deleteSelectedRows(_ sender: Any?) {
@@ -1044,6 +1051,8 @@ extension TableTabViewController: NSMenuItemValidation {
             return mode == .data && lastButton.isEnabled
         case #selector(showGoToPage(_:)):
             return mode == .data && pageButton.isEnabled
+        case #selector(jumpToColumn(_:)):
+            return mode == .data && !grid.content.columns.isEmpty
         default:
             return true
         }

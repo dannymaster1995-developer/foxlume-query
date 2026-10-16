@@ -77,6 +77,8 @@ extension DataGridView {
         if allowsColumnFilter {
             menu.addItem(item("Filter with Column", #selector(filterWithColumn(_:))))
         }
+        menu.addItem(.separator())
+        addColumnItems(to: menu, column: column)
         return menu
     }
 

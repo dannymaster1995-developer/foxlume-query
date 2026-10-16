@@ -18,6 +18,10 @@ protocol DataGridViewDelegate: AnyObject {
     func dataGrid(_ grid: DataGridView, paste edits: [GridCellEdit], newRows: [[CellValue?]])
     /// "Filter with Column" in the header menu.
     func dataGrid(_ grid: DataGridView, filterColumn column: Int)
+    /// The arrangement to give the columns when the grid builds them for new columns; nil for the natural one.
+    func dataGridSavedColumnLayout(_ grid: DataGridView) -> GridColumnLayout?
+    /// The user moved, resized, hid or showed columns; nil after Reset Column Layout.
+    func dataGrid(_ grid: DataGridView, didChangeColumnLayout layout: GridColumnLayout?)
 }
 
 extension DataGridViewDelegate {
@@ -33,6 +37,8 @@ extension DataGridViewDelegate {
     }
     func dataGrid(_ grid: DataGridView, paste edits: [GridCellEdit], newRows: [[CellValue?]]) {}
     func dataGrid(_ grid: DataGridView, filterColumn column: Int) {}
+    func dataGridSavedColumnLayout(_ grid: DataGridView) -> GridColumnLayout? { nil }
+    func dataGrid(_ grid: DataGridView, didChangeColumnLayout layout: GridColumnLayout?) {}
 }
 
 /// A new value for one cell: display row and data column.
@@ -101,6 +107,8 @@ final class DataGridView: NSView {
     var allowsColumnFilter = false
     /// Columns that are never editable, such as MongoDB `_id`.
     var immutableColumns: Set<String> = []
+    /// The open Columns list or Jump to Column field.
+    var columnPicker: GridColumnPickerController?
 
     /// When false, cells cannot be edited and edit actions are hidden.
     var isEditable = false {
@@ -292,7 +300,10 @@ final class DataGridView: NSView {
         tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
     }
 
-    private func rebuildColumns() {
+    /// Builds the table columns, arranged by `layout` (the delegate's saved one when not given).
+    func rebuildColumns(layout: GridColumnLayout? = nil, useSavedLayout: Bool = true) {
+        let saved = layout ?? (useSavedLayout ? delegate?.dataGridSavedColumnLayout(self) : nil)
+        let placements = saved?.arrange(content.columns.map(\.name)) ?? GridColumnLayout.defaultPlacements(count: content.columns.count)
         for column in tableView.tableColumns.reversed() {
             tableView.removeTableColumn(column)
         }
@@ -306,34 +317,46 @@ final class DataGridView: NSView {
         numberColumn.headerCell.alignment = .right
         tableView.addTableColumn(numberColumn)
 
-        for (index, column) in content.columns.enumerated() {
+        for placement in placements {
+            let index = placement.index
+            let column = content.columns[index]
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("c\(index)"))
             tableColumn.headerCell = GridHeaderCell(textCell: column.name)
             tableColumn.title = column.name
             tableColumn.headerToolTip = column.typeName.isEmpty ? column.name : "\(column.name) · \(column.typeName)"
-            tableColumn.width = idealWidth(for: index)
-            tableColumn.minWidth = 40
+            tableColumn.minWidth = Self.minimumColumnWidth
             tableColumn.maxWidth = 2000
+            tableColumn.width = placement.width.map { CGFloat($0) } ?? idealWidth(for: index)
+            tableColumn.isHidden = placement.isHidden
             tableView.addTableColumn(tableColumn)
         }
     }
 
-    private func rowNumberWidth() -> CGFloat {
+    static let minimumColumnWidth: CGFloat = 40
+
+    func rowNumberWidth() -> CGFloat {
         let digits = String(content.rowOffset + max(content.displayRowCount, 1)).count
         return CGFloat(max(3, digits)) * 8 + 16
     }
 
+    /// The starting width: the header and the first rows' text, between 60 and 360 points.
     private func idealWidth(for column: Int) -> CGFloat {
+        let values = content.rows.prefix(60).compactMap { $0[safe: column] }
+        return min(max(measuredWidth(column: column, values: values, characters: 60), 60), 360)
+    }
+
+    /// The width that shows the header (with room for the sort chevron) and the widest of `values`, each cut to
+    /// `characters`.
+    func measuredWidth(column: Int, values: [CellValue], characters: Int) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         let header = (content.columns[column].name as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .medium)]).width + 28
         var widest = header
-        for row in content.rows.prefix(60) {
-            guard let value = row[safe: column] else { continue }
+        for value in values {
             let text = Self.displayText(value)
-            let sample = text.count > 60 ? String(text.prefix(60)) : text
-            widest = max(widest, (sample as NSString).size(withAttributes: attributes).width + 16)
+            let sample = text.count > characters ? String(text.prefix(characters)) : text
+            widest = max(widest, ceil((sample as NSString).size(withAttributes: attributes).width) + 16)
         }
-        return min(max(widest, 60), 360)
+        return widest
     }
 
     static func displayText(_ value: CellValue) -> String {
@@ -374,7 +397,7 @@ final class DataGridView: NSView {
     }
 
     func beginEditing(row: Int, tableColumn: Int) {
-        guard isEditable, let column = dataColumnIndex(atTableColumn: tableColumn), !isImmutable(column) else { return }
+        guard isEditable, let column = dataColumnIndex(atTableColumn: tableColumn), !isImmutable(column), !tableView.tableColumns[tableColumn].isHidden else { return }
         guard !content.changes.deletions.contains(row) else { NSSound.beep(); return }
         if let position = displayPosition(ofDataColumn: column) {
             setCellSelection(.single(GridCell(row: row, column: position)))
@@ -419,7 +442,7 @@ final class DataGridView: NSView {
             return (active.row, tableColumn)
         }
         guard tableView.selectedRow >= 0 else { return nil }
-        return (tableView.selectedRow, tableView.lastClickedColumn > 0 ? tableView.lastClickedColumn : 1)
+        return (tableView.selectedRow, tableView.lastClickedColumn > 0 ? tableView.lastClickedColumn : (firstVisibleTableColumn ?? 1))
     }
 
     private func rowsForCopy(_ indexes: IndexSet) -> [[CellValue]] {
@@ -582,6 +605,13 @@ extension DataGridView: NSTableViewDataSource, NSTableViewDelegate {
         updateCellSelectionAppearance()
     }
 
+    /// A double-click on a header divider sizes the column to fit its header and the loaded rows.
+    func tableView(_ tableView: NSTableView, sizeToFitWidthOfColumn column: Int) -> CGFloat {
+        guard let tableColumn = tableView.tableColumns[safe: column] else { return Self.minimumColumnWidth }
+        guard let dataColumn = dataColumnIndex(tableColumn) else { return max(rowNumberWidth(), tableColumn.minWidth) }
+        return fitWidth(forDataColumn: dataColumn)
+    }
+
     func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
         guard isEditable, let column = dataColumnIndex(tableColumn) else { return false }
         return !isImmutable(column)
@@ -609,8 +639,9 @@ extension DataGridView: NSTextFieldDelegate {
             return
         }
         commitEdit(row: row, column: column, text: field.stringValue)
-        if movement == NSTextMovement.tab.rawValue, tableColumn + 1 < tableView.numberOfColumns {
-            DispatchQueue.main.async { self.beginEditing(row: row, tableColumn: tableColumn + 1) }
+        if movement == NSTextMovement.tab.rawValue,
+           let next = tableView.tableColumns.indices.first(where: { $0 > tableColumn && !tableView.tableColumns[$0].isHidden }) {
+            DispatchQueue.main.async { self.beginEditing(row: row, tableColumn: next) }
         } else {
             tableView.window?.makeFirstResponder(tableView)
         }
@@ -758,7 +789,7 @@ final class GridTableView: NSTableView {
                 return
             }
             if selectedRow >= 0 {
-                let column = lastClickedColumn > 0 ? lastClickedColumn : 1
+                let column = lastClickedColumn > 0 ? lastClickedColumn : (grid.firstVisibleTableColumn ?? 1)
                 grid.beginEditing(row: selectedRow, tableColumn: column)
                 return
             }

@@ -6,10 +6,11 @@ import FoxlumeQueryCore
 extension DataGridView {
     // MARK: Column positions
 
-    /// Data column indexes in on-screen order (columns can be dragged around).
+    /// Data column indexes in on-screen order (columns can be dragged around); hidden columns are left out, so cell
+    /// selections, arrows and copies only see what is shown.
     var displayedDataColumns: [Int] {
         if let displayOrderCache { return displayOrderCache }
-        let order = tableView.tableColumns.compactMap { dataColumnIndex($0) }
+        let order = tableView.tableColumns.filter { !$0.isHidden }.compactMap { dataColumnIndex($0) }
         displayOrderCache = order
         return order
     }

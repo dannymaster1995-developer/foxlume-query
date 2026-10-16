@@ -65,6 +65,7 @@ import AppKit
     @objc optional func dropSchema(_ sender: Any?)
     @objc optional func reportIssue(_ sender: Any?)
     @objc optional func showERDiagram(_ sender: Any?)
+    @objc optional func jumpToColumn(_ sender: Any?)
 }
 
 @MainActor
@@ -167,6 +168,7 @@ enum MainMenu {
             item("Row Inspector", #selector(FoxlumeQueryActions.toggleInspector(_:)), "i", [.command, .option]),
             item("Saved Queries", #selector(FoxlumeQueryActions.showSavedQueries(_:))),
             item("Focus Sidebar Filter", #selector(FoxlumeQueryActions.focusTableFilter(_:)), "f", [.command, .option, .control]),
+            item("Jump to Column…", #selector(FoxlumeQueryActions.jumpToColumn(_:)), "j", [.command, .control]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ]))
