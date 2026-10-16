@@ -313,7 +313,7 @@ public final class CSVImporter {
     static func isRowError(_ error: DatabaseError) -> Bool {
         switch error {
         case .server, .unsupported: return true
-        case .connection, .authentication, .protocolViolation, .cancelled, .notConnected: return false
+        case .connection, .authentication, .protocolViolation, .cancelled, .queryTimeout, .notConnected: return false
         }
     }
 

@@ -76,6 +76,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **TLS 1.3**, with Verify CA / Verify Identity modes, a custom CA and client certificates (PEM or PKCS#12).
 - **SSH tunnels**, connection URLs (`postgres://`, `mysql://`…) and passwords kept in the macOS Keychain.
 - **Safe Mode** per connection: Silent, Alert, Safe Mode with Touch ID, or Read-Only. Production connections are clearly labelled.
+- **Query timeout and startup commands** per connection: stop queries that run too long, and run SQL such as `SET search_path` or `SET time_zone` on every new session, reconnects included.
 
 <details>
 <summary><b>More screenshots</b></summary>

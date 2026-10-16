@@ -81,10 +81,6 @@ public extension DatabaseSession {
     /// Runs the request as one queue job, so nothing queued meanwhile can run inside its transaction.
     /// Cancelling `token` interrupts it; the transaction is still rolled back.
     func explain(_ request: ExplainRequest, token: QueryToken? = nil) async throws -> ExplainOutcome {
-        try await run { connection in
-            try self.begin(token)
-            defer { self.end(token) }
-            return try ExplainRunner.run(request, on: connection)
-        }
+        try await runStatement(token) { try ExplainRunner.run(request, on: $0) }
     }
 }

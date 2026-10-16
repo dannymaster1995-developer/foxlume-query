@@ -133,25 +133,71 @@ public final class DatabaseSession: @unchecked Sendable {
         self.tunnel = tunnel
     }
 
+    /// Runs statements typed by the user, so the connection's query timeout applies.
     public func execute(_ sql: String, rowLimit: Int? = nil, token: QueryToken? = nil) async throws -> [StatementResult] {
-        try await run { connection in
-            try self.begin(token)
-            defer { self.end(token) }
-            return try connection.execute(sql, rowLimit: rowLimit)
-        }
+        try await runStatement(token) { try $0.execute(sql, rowLimit: rowLimit) }
     }
 
-    /// Loads one page and, separately, the matching count; both run on the session queue.
+    /// Loads one page and, separately, the matching count; both run on the session queue under the query timeout.
     public func fetchRows(_ query: TableQuery, token: QueryToken? = nil) async throws -> StatementResult {
-        try await run { connection in
-            try self.begin(token)
-            defer { self.end(token) }
-            return try connection.fetchRows(query)
-        }
+        try await runStatement(token) { try $0.fetchRows(query) }
     }
 
     public func countRows(_ query: TableQuery) async throws -> Int? {
-        try await run { try $0.countRows(query) }
+        try await runStatement(nil) { try $0.countRows(query) }
+    }
+
+    /// Seconds a query tab statement or table page may run, nil for no limit (`ConnectionConfig.queryTimeout`).
+    public var queryTimeout: Int? { parameters.config.effectiveQueryTimeout }
+
+    /// Runs `body` as the statement of `token` on the session queue. With a query timeout, a timer stops the statement
+    /// through the same path as Cancel when it runs too long, and the error says so. Metadata reads use `run` instead
+    /// and are not limited.
+    func runStatement<T>(_ token: QueryToken?, _ body: @escaping (DatabaseConnection) throws -> T) async throws -> T {
+        guard let seconds = queryTimeout else {
+            return try await run { connection in
+                try self.begin(token)
+                defer { self.end(token) }
+                return try body(connection)
+            }
+        }
+        let token = token ?? QueryToken()
+        return try await run { connection in
+            try self.begin(token)
+            defer { self.end(token) }
+            let expired = LockedFlag()
+            let timer = DispatchWorkItem { [weak self] in
+                if self?.expire(token) == true { expired.set() }
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + .seconds(seconds), execute: timer)
+            defer { timer.cancel() }
+            let result: T
+            do {
+                result = try body(connection)
+            } catch {
+                if expired.isSet || Self.isServerTimeout(error) { throw DatabaseError.queryTimeout(seconds: seconds) }
+                throw error
+            }
+            // A stopped statement can still end normally (MySQL's SLEEP returns 1 when killed), and its result is cut
+            // short, so it is reported as stopped too.
+            if expired.isSet { throw DatabaseError.queryTimeout(seconds: seconds) }
+            return result
+        }
+    }
+
+    /// Cancels `token`'s statement when it is still the one running. Returns whether it was.
+    private func expire(_ token: QueryToken) -> Bool {
+        let isRunning = withState { activeToken === token }
+        if isRunning { cancel(token) }
+        return isRunning
+    }
+
+    /// The server's own statement limit, set by `SessionSetup` as a backstop: PostgreSQL `statement_timeout`
+    /// (57014 with its own message, as opposed to a cancel) and MySQL `max_execution_time` (3024).
+    static func isServerTimeout(_ error: Error) -> Bool {
+        guard case let .server(message, code, _)? = error as? DatabaseError, let code else { return false }
+        if code == "57014" { return message.localizedCaseInsensitiveContains("statement timeout") }
+        return code == "3024" || code.hasPrefix("3024/")
     }
 
     /// Saves grid edits as one queue job, so nothing queued meanwhile runs inside the driver's transaction.

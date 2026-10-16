@@ -84,7 +84,8 @@ Sources/
   CDuckDB/              DuckDB C API module (library in Vendor/duckdb)
   FoxlumeQueryCore/     UI-independent library
     Models/             connection settings, results, schema types
-    Drivers/            DatabaseConnection protocol, DatabaseSession (serial queue, ping, reconnect)
+    Drivers/            DatabaseConnection protocol, DatabaseSession (serial queue, ping, reconnect, query timeout),
+                        SessionSetup (startup commands and server timeout applied on every connect)
       Transport/        TCP sockets with in-place TLS upgrade, SSH tunnel, connect deadlines
       TLS/              Network.framework TLS stream, PEM and key decoding, client identities, certificate checks
       Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/

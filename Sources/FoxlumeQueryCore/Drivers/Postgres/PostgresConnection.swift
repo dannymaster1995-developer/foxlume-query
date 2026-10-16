@@ -75,6 +75,7 @@ public final class PostgresConnection: DatabaseConnection, TLSReporting {
             try readUntilReady(transport)
             try loadSessionInfo()
             if deadline.finish() { throw timedOut }
+            try applySessionSetup(parameters.config) { "SET statement_timeout = \($0)" }
         } catch {
             let fired = deadline.finish()
             dropConnection()
@@ -314,7 +315,7 @@ public final class PostgresConnection: DatabaseConnection, TLSReporting {
             return try simpleQuery(sql, rowLimit: rowLimit, on: transport)
         } catch let error as DatabaseError {
             switch error {
-            case .server, .cancelled, .unsupported:
+            case .server, .cancelled, .queryTimeout, .unsupported:
                 // Thrown only after ReadyForQuery (or for FATAL, after dropping), so the session is in sync.
                 break
             case .connection, .authentication, .protocolViolation, .notConnected:

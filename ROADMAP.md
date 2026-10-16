@@ -41,7 +41,7 @@ Data grid:
 
 Editor and results:
 - [x] FQ-106 Highlight the current statement, word wrap, run and move to the next statement (⌃⌘↩)
-- [ ] FQ-107 Per-connection query timeout and startup commands
+- [x] FQ-107 Per-connection query timeout and startup commands
 - [x] FQ-122 Tab bar overflow: show the tabs that fit (the selected and most recently used stay visible) and a "+N" button listing the rest; opening tabs never widens the window
 
 Schema and server:

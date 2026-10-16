@@ -8,8 +8,11 @@ extension ConnectionWorkspace {
     var supportsTableTransfer: Bool { kind.isSQL }
 
     /// Opens a second session with the same settings, switched to the database (and read-only mode) in use.
+    /// It runs the connection's startup commands but has no query timeout: exports, imports and Run file may take long.
     func openTransferSession() async throws -> DatabaseSession {
-        let session = DatabaseSession(parameters: self.session.parameters)
+        var parameters = self.session.parameters
+        parameters.config.queryTimeout = nil
+        let session = DatabaseSession(parameters: parameters)
         do {
             try await session.connect()
             if kind.supportsMultipleDatabases, let database = currentDatabase, !database.isEmpty {

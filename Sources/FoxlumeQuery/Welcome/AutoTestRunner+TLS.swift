@@ -4,9 +4,11 @@ import FoxlumeQueryCore
 /// Scripted commands for the SSL/TLS part of the connection form. They act on the form opened with `form`.
 ///
 ///     tlsset <field> <value>    sets a form field: name, kind, host, port, user, password, database, mode
-///                               (disable|prefer|require|verifyCA|verifyFull), ca, cert, key, p12, secret;
-///                               an empty value clears a path
-///     tlsscroll [result]        scrolls the form to the SSL/TLS section (or down to the Test Connection result)
+///                               (disable|prefer|require|verifyCA|verifyFull), ca, cert, key, p12, secret,
+///                               safemode (a SafeModeLevel raw value), querytimeout (seconds, empty for no limit),
+///                               startup (Run on connect; `\n` starts a new line); an empty value clears a path
+///     tlsscroll [result|advanced] scrolls the form to the SSL/TLS section (or to the Test Connection result, or
+///                               to the Advanced section)
 ///     formsize <width>x<height> resizes the form window
 ///     tlsstate                  logs the mode, the paths, the file checks and the validation message
 ///     tlstest                   presses Test Connection and logs the result when it arrives
@@ -29,7 +31,7 @@ extension AutoTestRunner {
             try Self.set(field, parts.count > 1 ? parts[1] : "", on: model)
             try await Task.sleep(nanoseconds: 300_000_000)
         case "tlsscroll":
-            model.scrollTarget = argument == "result" ? "result" : "tls"
+            model.scrollTarget = ["result", "advanced"].contains(argument) ? argument : "tls"
             try await Task.sleep(nanoseconds: 500_000_000)
         case "formsize":
             let size = argument.split(separator: "x").compactMap { Double($0) }
@@ -50,6 +52,7 @@ extension AutoTestRunner {
             record("  ca check: \(Self.describe(check.ca))")
             record("  client check: \(Self.describe(check.client))")
             record("  validation: \(model.validationMessage ?? "ok")")
+            record("  query timeout: \(model.config.queryTimeout.map { "\($0) s" } ?? "none"); run on connect: \(model.config.startupCommands.map { "\($0.split(whereSeparator: \.isNewline).count) line(s)" } ?? "none")")
         case "tlstest":
             model.test()
             try await waitFor(seconds: 30) { model.testState != .testing }
@@ -100,6 +103,13 @@ extension AutoTestRunner {
             model.setUsesPKCS12(true)
             model.config.certificates.pkcs12Path = value
         case "secret": model.tlsSecret = value
+        case "safemode":
+            guard let level = SafeModeLevel(rawValue: value) else { throw DatabaseError.unsupported("Unknown Safe Mode \(value)") }
+            model.config.safeModeLevel = level
+        case "querytimeout": model.config.queryTimeout = Int(value).flatMap { $0 > 0 ? $0 : nil }
+        case "startup":
+            let text = value.replacingOccurrences(of: "\\n", with: "\n")
+            model.config.startupCommands = text.isEmpty ? nil : text
         default: throw DatabaseError.unsupported("Unknown tlsset field \(field)")
         }
     }

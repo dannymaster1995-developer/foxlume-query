@@ -36,6 +36,12 @@ public final class SQLiteConnection: DatabaseConnection {
         handleLock.unlock()
         serverVersion = String(cString: sqlite3_libversion())
         _ = try? execute("PRAGMA foreign_keys = ON", rowLimit: nil)
+        do {
+            try applySessionSetup(parameters.config)
+        } catch {
+            close()
+            throw error
+        }
     }
 
     public func close() {

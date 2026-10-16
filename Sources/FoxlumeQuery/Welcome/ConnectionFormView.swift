@@ -182,7 +182,6 @@ struct ConnectionFormView: View {
                             TextField("Database", text: $model.config.database, prompt: Text(databasePrompt))
                                 .accessibilityIdentifier("connectionDatabase")
                         }
-                        Stepper("Connect timeout: \(model.config.connectTimeout) s", value: $model.config.connectTimeout, in: 2...120)
                     }
 
                     ConnectionTLSSection(model: model)
@@ -229,6 +228,9 @@ struct ConnectionFormView: View {
                         }
                     }
                 }
+
+                advancedSection
+                    .id("advanced")
 
                 Section("Appearance & Safety") {
                     Picker("Environment", selection: $model.config.environment) {
@@ -314,6 +316,67 @@ struct ConnectionFormView: View {
             Text(kind.displayName + " support is in beta: it works, but it has had less testing than PostgreSQL and MySQL.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Connect timeout for servers; query timeout and startup commands for SQL engines.
+    @ViewBuilder
+    private var advancedSection: some View {
+        let kind = model.config.kind
+        Section {
+            if !kind.isFileBased {
+                Stepper("Connect timeout: \(model.config.connectTimeout) s", value: $model.config.connectTimeout, in: 2...120)
+            }
+            if kind.isSQL {
+                LabeledContent("Query timeout") {
+                    HStack(spacing: 6) {
+                        TextField("Query timeout", value: queryTimeout, format: .number.grouping(.never), prompt: Text("No limit"))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                            .accessibilityIdentifier("queryTimeout")
+                        Text("s")
+                    }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Run on connect")
+                    TextField("Run on connect", text: startupCommands, prompt: Text(startupPrompt), axis: .vertical)
+                        .labelsHidden()
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(3...8)
+                        .accessibilityIdentifier("startupCommands")
+                }
+            }
+        } header: {
+            Text("Advanced")
+        } footer: {
+            if kind.isSQL {
+                Text("Query timeout stops a statement from a query tab, or a table page, that runs longer; leave it empty for no limit. Run on connect runs on every new session, reconnects included; a failing statement stops the connection.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Empty and 0 both mean no limit and are saved as nil.
+    private var queryTimeout: Binding<Int?> {
+        Binding(get: { model.config.queryTimeout }, set: { model.config.queryTimeout = ($0 ?? 0) > 0 ? $0 : nil })
+    }
+
+    private var startupCommands: Binding<String> {
+        Binding(
+            get: { model.config.startupCommands ?? "" },
+            set: { model.config.startupCommands = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        )
+    }
+
+    private var startupPrompt: String {
+        switch model.config.kind {
+        case .postgresql: return "SET search_path TO app, public;"
+        case .mysql, .mariadb: return "SET time_zone = '+00:00';"
+        case .sqlite: return "PRAGMA cache_size = -20000;"
+        case .duckdb: return "SET threads = 4;"
+        case .mongodb, .redis: return ""
         }
     }
 

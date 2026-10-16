@@ -77,6 +77,15 @@ public final class MySQLConnection: DatabaseConnection, TLSReporting {
             teardown(sendQuit: false)
             throw timedOut
         }
+        do {
+            // MySQL's max_execution_time stops read-only SELECTs only. MariaDB's max_statement_time would stop writes
+            // too, so MariaDB relies on the client-side stop alone.
+            let isMariaDB = isMariaDB
+            try applySessionSetup(config) { isMariaDB ? nil : "SET SESSION max_execution_time = \($0)" }
+        } catch {
+            teardown(sendQuit: true)
+            throw error
+        }
     }
 
     private func handshake(transport: SocketTransport, tls: TLSContext) throws {
@@ -283,7 +292,7 @@ public final class MySQLConnection: DatabaseConnection, TLSReporting {
             return try body(stream)
         } catch let error as DatabaseError {
             switch error {
-            case .server, .cancelled, .unsupported, .authentication:
+            case .server, .cancelled, .queryTimeout, .unsupported, .authentication:
                 throw error
             case .connection, .protocolViolation, .notConnected:
                 teardown(sendQuit: false)
@@ -368,6 +377,9 @@ public final class MySQLConnection: DatabaseConnection, TLSReporting {
         guard let target else { return }
         var killerParameters = parameters
         killerParameters.config.database = ""
+        // KILL QUERY needs none of the session settings, and a failing startup command must not block the cancel.
+        killerParameters.config.startupCommands = nil
+        killerParameters.config.queryTimeout = nil
         // Connecting can take a while on a remote server; never block the caller (usually the main thread).
         // Best effort: if the kill fails, the statement simply runs to completion.
         DispatchQueue.global(qos: .userInitiated).async {

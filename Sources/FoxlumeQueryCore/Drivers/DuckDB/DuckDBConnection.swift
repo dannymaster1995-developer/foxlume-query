@@ -136,6 +136,12 @@ public final class DuckDBConnection: DatabaseConnection {
             }
         }
         refusesWrites = source.viewName != nil || (source == .memory && config.readOnly)
+        do {
+            try applySessionSetup(config)
+        } catch {
+            close()
+            throw error
+        }
     }
 
     /// Rewrites DuckDB's lock conflict, which names the holder's executable and a documentation link,

@@ -7,6 +7,8 @@ public enum DatabaseError: Error, LocalizedError, Sendable {
     case server(message: String, code: String?, detail: String? = nil)
     case protocolViolation(String)
     case cancelled
+    /// The connection's query timeout stopped the statement (`ConnectionConfig.queryTimeout`).
+    case queryTimeout(seconds: Int)
     case unsupported(String)
     case notConnected
 
@@ -21,6 +23,8 @@ public enum DatabaseError: Error, LocalizedError, Sendable {
             return text
         case .protocolViolation(let message): return "Protocol error: \(message)"
         case .cancelled: return "The query was cancelled."
+        case .queryTimeout(let seconds):
+            return "The query was stopped after \(seconds) second\(seconds == 1 ? "" : "s") by the connection's query timeout."
         case .unsupported(let message): return message
         case .notConnected: return "Not connected."
         }
@@ -30,7 +34,7 @@ public enum DatabaseError: Error, LocalizedError, Sendable {
     public var isConnectionLoss: Bool {
         switch self {
         case .connection, .notConnected: return true
-        case .authentication, .server, .protocolViolation, .cancelled, .unsupported: return false
+        case .authentication, .server, .protocolViolation, .cancelled, .queryTimeout, .unsupported: return false
         }
     }
 }

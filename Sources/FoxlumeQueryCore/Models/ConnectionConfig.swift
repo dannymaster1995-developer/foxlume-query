@@ -141,6 +141,18 @@ public struct ConnectionConfig: Codable, Hashable, Sendable, Identifiable {
     public var options: [String: String]?
     /// CA and client certificate files. Nil when none are set (and for connections saved before they existed).
     public var tlsFiles: TLSCertificateFiles?
+    /// Seconds a statement from a query tab or a table page may run before it is stopped; nil or 0 means no limit.
+    /// SQL engines only. Optional so connections saved before it existed still decode.
+    public var queryTimeout: Int?
+    /// SQL run on every new session of a SQL connection ("Run on connect"), such as `SET search_path TO app, public;`.
+    /// Nil when empty, and for connections saved before it existed.
+    public var startupCommands: String?
+
+    /// `queryTimeout` when it limits anything: a positive number of seconds on a SQL engine.
+    public var effectiveQueryTimeout: Int? {
+        guard kind.isSQL, let queryTimeout, queryTimeout > 0 else { return nil }
+        return queryTimeout
+    }
 
     /// Non-optional view of `tlsFiles`; setting empty paths stores nil.
     public var certificates: TLSCertificateFiles {
