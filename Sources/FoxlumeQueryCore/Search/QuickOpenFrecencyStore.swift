@@ -76,6 +76,25 @@ public final class QuickOpenFrecencyStore: @unchecked Sendable {
             .map(\.key)
     }
 
+    /// Gives the items `rename` maps a new key, after a schema or database was renamed. Visits already recorded under
+    /// a new key are merged in.
+    public func renameKeys(connection: UUID, _ rename: (String) -> String?) {
+        lock.lock()
+        var items = visits[connection.uuidString] ?? [:]
+        let moves = items.keys.compactMap { key in rename(key).map { (key, $0) } }
+        guard !moves.isEmpty else { return lock.unlock() }
+        for (old, new) in moves {
+            let times = (items.removeValue(forKey: old) ?? []) + (items[new] ?? [])
+            items[new] = Array(times.sorted().suffix(Self.visitsPerItem))
+        }
+        visits[connection.uuidString] = items
+        let snapshot = visits
+        lock.unlock()
+        if let data = try? JSONEncoder().encode(snapshot) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
     /// Forgets a deleted connection.
     public func removeConnection(_ connection: UUID) {
         lock.lock()

@@ -64,6 +64,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **ER diagrams** of a whole schema, with crow's-foot relationships, drag-to-arrange layouts that are remembered, and PNG or PDF export.
 - **A structure editor** for PostgreSQL and MySQL: add or change columns, indexes, foreign keys and comments, drag columns into a new order, review the generated `ALTER` statements, then save. MySQL moves columns in place; PostgreSQL rebuilds the table in one transaction when nothing depends on it. **New Table** builds a `CREATE TABLE` with a live preview.
 - **Functions, procedures, triggers and types** in the sidebar, with their source and "Edit in Query Tab".
+- **Rename and copy** on PostgreSQL: Rename Schema, Rename Database and Copy Database. Open tables, column layouts, ER layouts and filter presets follow the new name, and if someone else is connected to the database you are renaming or copying, Foxlume Query tells you who instead of failing halfway.
 - **Views** for PostgreSQL, MySQL, MariaDB, SQLite and DuckDB: **New View** opens a `CREATE VIEW` template, **Edit View** opens the current definition ready to replace, and **Save View** runs it and selects the view in the sidebar. PostgreSQL materialized views can be edited and refreshed too.
 
 ### Import and export

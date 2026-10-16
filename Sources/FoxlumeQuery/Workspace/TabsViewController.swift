@@ -12,11 +12,13 @@ protocol WorkspaceTabContent: NSViewController {
 
 @MainActor
 final class WorkspaceTab {
-    let id = UUID()
+    let id: UUID
     let content: WorkspaceTabContent
     var isPreview: Bool
 
-    init(content: WorkspaceTabContent, isPreview: Bool) {
+    /// `id` is kept when a tab's content is replaced in place, so the strip keeps its position and recency.
+    init(content: WorkspaceTabContent, isPreview: Bool, id: UUID = UUID()) {
+        self.id = id
         self.content = content
         self.isPreview = isPreview
     }
@@ -111,10 +113,7 @@ final class TabsViewController: NSViewController {
             if let filters { (existing.content as? TableTabViewController)?.applyFilters(filters, raw: "") }
             return
         }
-        let controller = TableTabViewController(workspace: workspace, table: table, initialMode: mode, initialFilters: filters ?? [])
-        controller.onOpenReference = { [weak self] referenced, rules in
-            self?.openTable(referenced, newTab: true, filters: rules)
-        }
+        let controller = makeTableTab(table, mode: mode, filters: filters ?? [])
         if !newTab, let preview = tabs.firstIndex(where: { $0.isPreview && !$0.content.hasUnsavedChanges }) {
             let old = tabs[preview]
             let tab = WorkspaceTab(content: controller, isPreview: true)
@@ -129,6 +128,14 @@ final class TabsViewController: NSViewController {
         tabs.append(tab)
         install(tab)
         select(id: tab.id)
+    }
+
+    private func makeTableTab(_ table: TableRef, mode: TableTabViewController.Mode, filters: [FilterRule]) -> TableTabViewController {
+        let controller = TableTabViewController(workspace: workspace, table: table, initialMode: mode, initialFilters: filters)
+        controller.onOpenReference = { [weak self] referenced, rules in
+            self?.openTable(referenced, newTab: true, filters: rules)
+        }
+        return controller
     }
 
     @discardableResult
@@ -157,12 +164,17 @@ final class TabsViewController: NSViewController {
             if controller.loadError != nil { controller.reload(nil) }
             return controller
         }
-        let controller = ObjectSourceViewController(workspace: workspace, object: object)
-        controller.onCommand = { [weak self] command in self?.onObjectCommand?(command) }
+        let controller = makeObjectSourceTab(object)
         let tab = WorkspaceTab(content: controller, isPreview: false)
         tabs.append(tab)
         install(tab)
         select(id: tab.id)
+        return controller
+    }
+
+    private func makeObjectSourceTab(_ object: SchemaObject) -> ObjectSourceViewController {
+        let controller = ObjectSourceViewController(workspace: workspace, object: object)
+        controller.onCommand = { [weak self] command in self?.onObjectCommand?(command) }
         return controller
     }
 
@@ -175,15 +187,73 @@ final class TabsViewController: NSViewController {
             if let table { controller.focus(table: table) }
             return controller
         }
-        let controller = ERDiagramViewController(workspace: workspace, database: database, schema: schema)
-        controller.onOpenTable = { [weak self] ref in self?.openTable(ref, newTab: true) }
-        controller.onShowStructure = { [weak self] ref in self?.openTable(ref, newTab: true, mode: .structure) }
+        let controller = makeERDiagramTab(database: database, schema: schema)
         if let table { controller.focus(table: table) }
         let tab = WorkspaceTab(content: controller, isPreview: false)
         tabs.append(tab)
         install(tab)
         select(id: tab.id)
         return controller
+    }
+
+    private func makeERDiagramTab(database: String?, schema: String?) -> ERDiagramViewController {
+        let controller = ERDiagramViewController(workspace: workspace, database: database, schema: schema)
+        controller.onOpenTable = { [weak self] ref in self?.openTable(ref, newTab: true) }
+        controller.onShowStructure = { [weak self] ref in self?.openTable(ref, newTab: true, mode: .structure) }
+        return controller
+    }
+
+    /// After a schema or database was renamed, tabs showing it are rebuilt in place for the new name: table tabs keep
+    /// their mode and filter rules, ER diagrams and object sources show the renamed schema. Tabs with unsaved edits
+    /// must be saved or discarded first (the caller checks `hasUnsavedEdits(affectedBy:)`).
+    func retarget(_ rename: StoredStateRename) {
+        let connection = workspace.config.id
+        for index in tabs.indices {
+            let tab = tabs[index]
+            let replacement: WorkspaceTabContent
+            if let table = tab.content as? TableTabViewController {
+                let ref: TableRef
+                if let renamed = rename.renamed(table.table) {
+                    ref = renamed
+                } else if case .database(_, let from, _) = rename, table.openedDatabase == from {
+                    ref = table.table
+                } else {
+                    continue
+                }
+                replacement = makeTableTab(ref, mode: table.mode, filters: table.appliedFilterRules)
+            } else if let diagram = tab.content as? ERDiagramViewController,
+                      let scope = rename.renamed(ERDiagramScope(connectionID: connection, database: diagram.database, schema: diagram.schema)) {
+                replacement = makeERDiagramTab(database: scope.database, schema: scope.schema)
+            } else if let source = tab.content as? ObjectSourceViewController, case .schema(_, _, let from, let to) = rename, source.object.schema == from {
+                var object = source.object
+                object.schema = to
+                replacement = makeObjectSourceTab(object)
+            } else {
+                continue
+            }
+            let updated = WorkspaceTab(content: replacement, isPreview: tab.isPreview, id: tab.id)
+            let wasSelected = tab === selectedTab
+            if wasSelected { selectedTab = nil }
+            detach(tab)
+            tabs[index] = updated
+            install(updated)
+            if wasSelected { select(id: updated.id) }
+        }
+        closedTabs = closedTabs.map { closed in
+            guard let table = closed.table, let renamed = rename.renamed(table) else { return closed }
+            return (renamed, closed.sql, closed.title, closed.fileURL)
+        }
+        refreshStrip()
+    }
+
+    /// Whether a tab that `retarget(rename)` would rebuild has unsaved edits.
+    func hasUnsavedEdits(affectedBy rename: StoredStateRename) -> Bool {
+        tabs.contains { tab in
+            guard tab.content.hasUnsavedChanges, let table = tab.content as? TableTabViewController else { return false }
+            if rename.renamed(table.table) != nil { return true }
+            if case .database(_, let from, _) = rename { return table.openedDatabase == from }
+            return false
+        }
     }
 
     /// Closes the source tabs of an object after it was dropped.

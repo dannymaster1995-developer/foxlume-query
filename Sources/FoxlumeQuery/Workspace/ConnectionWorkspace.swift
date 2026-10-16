@@ -240,7 +240,9 @@ final class ConnectionWorkspace {
 
     /// Run SQL and record it in the query history. Pass a token to make this statement cancellable on its own.
     /// `transactional` runs the statements in one transaction that rolls back when one fails (Save View).
-    func execute(_ sql: String, rowLimit: Int? = nil, recordHistory: Bool = true, token: QueryToken? = nil, transactional: Bool = false) async throws -> [StatementResult] {
+    /// `refreshCatalog` false leaves reloading the catalog to the caller, after a statement that renames what it browses.
+    func execute(_ sql: String, rowLimit: Int? = nil, recordHistory: Bool = true, token: QueryToken? = nil, transactional: Bool = false,
+                 refreshCatalog: Bool = true) async throws -> [StatementResult] {
         if config.readOnly, !writeStatements(in: sql).isEmpty {
             throw DatabaseError.unsupported("This connection is read-only. Statements that change data are not run.")
         }
@@ -260,7 +262,7 @@ final class ConnectionWorkspace {
                 let rows = results.last(where: \.hasResultSet)?.rows.count ?? results.last?.affectedRows
                 AppEnvironment.history.add(sql: sql, connectionID: config.id, database: currentDatabase, duration: Date().timeIntervalSince(started), rowCount: rows, error: nil)
             }
-            if queryLanguage.split(sql).contains(where: { queryLanguage.changesCatalog($0.text) }) {
+            if refreshCatalog, queryLanguage.split(sql).contains(where: { queryLanguage.changesCatalog($0.text) }) {
                 await refreshMetadata()
             }
             return results
@@ -493,6 +495,50 @@ final class ConnectionWorkspace {
         if !queryLanguage.changesCatalog(statement) {
             await refreshMetadata()
         }
+    }
+
+    // MARK: Rename Schema, Rename and Copy Database
+
+    /// ALTER SCHEMA … RENAME TO …; the browsed schema and the staged truncates and drops in it follow the new name.
+    func renameSchema(_ old: String, to new: String) async throws {
+        guard let statement = DatabaseObjectSQL(kind: kind).renameSchema(old, to: new) else {
+            throw DatabaseError.unsupported(DatabaseObjectSQL.isSystemSchema(old)
+                ? "“\(old)” is a system schema and cannot be renamed."
+                : "\(kind.displayName) cannot rename schemas.")
+        }
+        _ = try await execute(statement, refreshCatalog: false)
+        if currentSchema == old { currentSchema = new }
+        pendingTableOperations = pendingTableOperations.map { operation in
+            guard operation.table.schema == old else { return operation }
+            var renamed = operation
+            renamed.table = TableRef(schema: new, name: operation.table.name)
+            return renamed
+        }
+        await refreshMetadata()
+    }
+
+    /// After Rename or Copy Database: `moved` is where the session went back to when it had to leave the source, and
+    /// a renamed database the connection names becomes the one reconnects open. Then the catalog is reloaded.
+    func adoptDatabaseChange(_ change: DatabaseChange, moved: String?) async {
+        if case .rename(let from, let to) = change, config.database == from {
+            config.database = to
+            session.setDefaultDatabase(to)
+            // The saved connection too, or it would fail to open next time.
+            if var stored = AppEnvironment.connections.connection(id: config.id), stored.database == from {
+                stored.database = to
+                try? AppEnvironment.connections.save(stored)
+            }
+        }
+        if moved != nil {
+            // The session reconnected to its database; read-only connections never get here, but stay safe.
+            try? await applyReadOnly()
+        }
+        await refreshMetadata()
+    }
+
+    /// Every database the server lists, system ones included, for picking where to wait during a rename or copy.
+    func allDatabases() async throws -> [String] {
+        try await tracked { try await session.run { try $0.databases() } }
     }
 
     func notifyMetadata() {

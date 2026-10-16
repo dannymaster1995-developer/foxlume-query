@@ -66,6 +66,9 @@ import AppKit
     @objc optional func dropDatabase(_ sender: Any?)
     @objc optional func newSchema(_ sender: Any?)
     @objc optional func dropSchema(_ sender: Any?)
+    @objc optional func renameSchema(_ sender: Any?)
+    @objc optional func renameDatabase(_ sender: Any?)
+    @objc optional func copyDatabase(_ sender: Any?)
     @objc optional func reportIssue(_ sender: Any?)
     @objc optional func showERDiagram(_ sender: Any?)
     @objc optional func jumpToColumn(_ sender: Any?)
@@ -155,8 +158,11 @@ enum MainMenu {
             item("New Table…", #selector(FoxlumeQueryActions.newTable(_:))),
             item("New View…", #selector(FoxlumeQueryActions.newView(_:))),
             item("New Database…", #selector(FoxlumeQueryActions.newDatabase(_:))),
+            item("Rename Database…", #selector(FoxlumeQueryActions.renameDatabase(_:))),
+            item("Copy Database…", #selector(FoxlumeQueryActions.copyDatabase(_:))),
             item("Drop Database…", #selector(FoxlumeQueryActions.dropDatabase(_:))),
             item("New Schema…", #selector(FoxlumeQueryActions.newSchema(_:))),
+            item("Rename Schema…", #selector(FoxlumeQueryActions.renameSchema(_:))),
             item("Drop Schema…", #selector(FoxlumeQueryActions.dropSchema(_:))),
             .separator(),
             item("ER Diagram", #selector(FoxlumeQueryActions.showERDiagram(_:))),

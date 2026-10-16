@@ -25,6 +25,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
     private let statusView = ToolbarStatusView()
     private let databasePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     var onClose: ((WorkspaceWindowController) -> Void)?
+    /// True while Rename or Copy Database runs (WorkspaceWindowController+Databases.swift).
+    var isChangingDatabase = false
     private var closingConfirmed = false
 
     init(workspace: ConnectionWorkspace) {
@@ -82,6 +84,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         sidebar.onImportCSV = { [weak self] table in self?.presentImportCSV(into: table) }
         sidebar.onRunSQLFile = { [weak self] in self?.presentRunSQLFile(file: nil) }
         sidebar.onNewTable = { [weak self] in self?.newTable(nil) }
+        sidebar.onRenameSchema = { [weak self] schema in self?.presentRenameSchema(schema) }
         sidebar.onViewCommand = { [weak self] command in self?.performViewCommand(command) }
         tabs.onViewSaved = { [weak self] view in self?.selectSavedView(view) }
         sidebar.onOpenObject = { [weak self] object in self?.openObjectSource(object) }
@@ -534,6 +537,13 @@ extension WorkspaceWindowController: NSMenuItemValidation {
             return databaseObjects.canManageDatabases && !workspace.isReadOnly && workspace.connectionState == .connected
         case #selector(newSchema(_:)), #selector(dropSchema(_:)):
             return databaseObjects.canManageSchemas && !workspace.isReadOnly && workspace.connectionState == .connected
+        case #selector(renameSchema(_:)):
+            return databaseObjects.canRenameSchemas && !workspace.isReadOnly && workspace.connectionState == .connected
+        case #selector(renameDatabase(_:)), #selector(copyDatabase(_:)):
+            // Shown disabled where the engine cannot, with the reason, as New Schema… is outside PostgreSQL.
+            let reason = menuItem.action == #selector(copyDatabase(_:)) ? databaseObjects.databaseCopyUnavailableReason : databaseObjects.databaseRenameUnavailableReason
+            menuItem.toolTip = reason ?? (workspace.isReadOnly ? "This connection is read-only" : nil)
+            return databaseObjects.canRenameDatabases && !workspace.isReadOnly && workspace.connectionState == .connected && !isChangingDatabase
         case #selector(newTable(_:)):
             return workspace.canChangeStructure && workspace.connectionState == .connected
         case #selector(newView(_:)):

@@ -147,6 +147,20 @@ public final class GridColumnLayoutStore: @unchecked Sendable {
         try mutate { entries in entries.removeAll { $0.scope == scope } }
     }
 
+    /// Gives entries whose scope `rename` maps a new scope; an entry already at a new scope is replaced.
+    func moveEntries(_ rename: (GridColumnLayoutScope) -> GridColumnLayoutScope?) throws {
+        let moves = entries.compactMap { entry in rename(entry.scope).map { (entry.scope, $0) } }
+        guard !moves.isEmpty else { return }
+        try mutate { entries in
+            let targets = Set(moves.map(\.1))
+            let sources = Set(moves.map(\.0))
+            entries.removeAll { targets.contains($0.scope) && !sources.contains($0.scope) }
+            for index in entries.indices {
+                if let scope = rename(entries[index].scope) { entries[index].scope = scope }
+            }
+        }
+    }
+
     // MARK: File
 
     private var entries: [Entry] {

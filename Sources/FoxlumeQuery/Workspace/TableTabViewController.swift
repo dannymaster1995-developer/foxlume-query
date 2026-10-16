@@ -27,7 +27,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         didSet { updateEditability() }
     }
     /// The database this tab's rows came from; MySQL table refs carry no database name.
-    private let openedDatabase: String?
+    let openedDatabase: String?
     /// Where the grid's column order, widths and hidden columns are remembered.
     let columnLayouts: GridColumnLayoutStore
     var columnLayoutScope: GridColumnLayoutScope {
@@ -604,6 +604,9 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         }
         filterBar.addFilterRule(rule)
     }
+
+    /// The filter rules applied now, for a tab that replaces this one (Rename Schema).
+    var appliedFilterRules: [FilterRule] { query.filters }
 
     /// `logic` nil keeps how the current rules combine (adding a rule from a cell menu).
     func applyFilters(_ rules: [FilterRule], raw: String, logic: FilterLogic? = nil) {

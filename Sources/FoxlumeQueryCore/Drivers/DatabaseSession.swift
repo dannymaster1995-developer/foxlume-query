@@ -8,7 +8,9 @@ public final class QueryToken: @unchecked Sendable {
 
 /// Owns one `DatabaseConnection` and serializes all work on it onto a private queue.
 public final class DatabaseSession: @unchecked Sendable {
-    public let parameters: ConnectionParameters
+    /// What the session connects with; guarded by `stateLock` because a database rename can change it.
+    public var parameters: ConnectionParameters { withState { _parameters } }
+    private var _parameters: ConnectionParameters
     /// Replaced once in `connect()` when an SSH tunnel moves the endpoint to a local port.
     private var connection: DatabaseConnection
     private var tunnel: SSHTunnel?
@@ -20,7 +22,7 @@ public final class DatabaseSession: @unchecked Sendable {
     private var _serverVersion = ""
 
     public init(parameters: ConnectionParameters) {
-        self.parameters = parameters
+        self._parameters = parameters
         self.connection = ConnectionFactory.make(parameters)
         self.queue = DispatchQueue(label: "FoxlumeQuery.session.\(parameters.config.id.uuidString)", qos: .userInitiated)
     }
@@ -104,6 +106,7 @@ public final class DatabaseSession: @unchecked Sendable {
     public func reconnect() async throws {
         currentConnection.abort()
         await close()
+        let parameters = self.parameters
         withState { connection = ConnectionFactory.make(parameters) }
         try await connect()
     }
@@ -145,6 +148,12 @@ public final class DatabaseSession: @unchecked Sendable {
 
     public func countRows(_ query: TableQuery) async throws -> Int? {
         try await runStatement(nil) { try $0.countRows(query) }
+    }
+
+    /// Makes later reconnects open `name`, after the database the connection names was renamed. The link in use is
+    /// left as it is.
+    public func setDefaultDatabase(_ name: String) {
+        withState { _parameters.config.database = name }
     }
 
     /// Seconds a query tab statement or table page may run, nil for no limit (`ConnectionConfig.queryTimeout`).

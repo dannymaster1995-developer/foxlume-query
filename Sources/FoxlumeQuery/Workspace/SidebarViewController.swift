@@ -29,9 +29,11 @@ final class SidebarViewController: NSViewController {
     var onObjectCommand: ((SchemaObjectCommand) -> Void)?
     /// ER Diagram (nil, from the empty area) or Show in ER Diagram (a table); see WorkspaceWindowController+Diagram.swift.
     var onShowERDiagram: ((TableRef?) -> Void)?
+    /// Rename Schema… for the browsed schema, from the schema picker's context menu or the empty area's.
+    var onRenameSchema: ((String) -> Void)?
 
     private let filterField = NSSearchField()
-    private let schemaPopup = NSPopUpButton()
+    private let schemaPopup = ContextMenuPopUpButton()
     let outline = NSOutlineView()
     private let statusLabel = UI.label("", size: 11, color: .secondaryLabelColor)
     private let spinner = NSProgressIndicator()
@@ -96,6 +98,7 @@ final class SidebarViewController: NSViewController {
         schemaPopup.action = #selector(schemaChanged(_:))
         schemaPopup.isHidden = !workspace.kind.supportsSchemas
         schemaPopup.toolTip = "Schema"
+        schemaPopup.contextMenu = { [weak self] in self?.schemaContextMenu() }
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         outline.addTableColumn(column)
@@ -425,6 +428,31 @@ final class SidebarViewController: NSViewController {
         Task { await workspace.refreshMetadata() }
     }
 
+    /// Whether Rename Schema… is offered: PostgreSQL, writable, and not a system schema.
+    private var renamableSchema: String? {
+        guard onRenameSchema != nil, !workspace.isReadOnly, DatabaseObjectSQL(kind: workspace.kind).canRenameSchemas,
+              let schema = workspace.currentSchema, !DatabaseObjectSQL.isSystemSchema(schema) else { return nil }
+        return schema
+    }
+
+    private func schemaContextMenu() -> NSMenu? {
+        guard renamableSchema != nil else { return nil }
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "Rename Schema…", action: #selector(menuRenameSchema(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    /// The schema picker's context menu, for scripted checks.
+    func schemaMenuTitles() -> [String] {
+        schemaContextMenu()?.items.map(\.title) ?? []
+    }
+
+    @objc private func menuRenameSchema(_ sender: Any?) {
+        if let schema = workspace.currentSchema { onRenameSchema?(schema) }
+    }
+
     @objc private func menuNewTable(_ sender: Any?) {
         onNewTable?()
     }
@@ -728,6 +756,30 @@ extension SidebarViewController: NSMenuDelegate {
         if menuTarget == nil, onShowERDiagram != nil, workspace.supportsERDiagram {
             menu.addItem(item("ER Diagram", #selector(menuShowERDiagram(_:))))
         }
+        if menuTarget == nil, renamableSchema != nil {
+            menu.addItem(item("Rename Schema…", #selector(menuRenameSchema(_:))))
+        }
         menu.addItem(item("Refresh", #selector(menuRefresh(_:))))
+    }
+}
+
+/// A pop-up button that shows its own context menu on a right-click or Control-click instead of opening its list.
+final class ContextMenuPopUpButton: NSPopUpButton {
+    var contextMenu: (() -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        contextMenu?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = contextMenu?() else { return super.rightMouseDown(with: event) }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control), let menu = contextMenu?() {
+            return NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
+        super.mouseDown(with: event)
     }
 }

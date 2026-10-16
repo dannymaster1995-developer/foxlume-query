@@ -47,7 +47,7 @@ Editor and results:
 Schema and server:
 - [x] FQ-108 Create and edit views
 - [x] FQ-109 Column reorder and table comments in the structure editor
-- [ ] FQ-110 Rename schemas (PostgreSQL); rename and copy databases where the server allows it
+- [x] FQ-110 Rename schemas (PostgreSQL); rename and copy databases where the server allows it
 - [ ] FQ-111 Maintenance: VACUUM and ANALYZE (PostgreSQL), OPTIMIZE, ANALYZE and CHECK TABLE (MySQL)
 - [ ] FQ-112 Server activity: running sessions, cancel or kill a query, slow queries
 

@@ -109,6 +109,8 @@ final class AutoTestRunner {
             try await performTabs(command, argument)
         case _ where EditorAutoTest.commands.contains(command):
             try await performEditor(command, argument)
+        case _ where DatabasesAutoTest.commands.contains(command):
+            try await performDatabases(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
             for window in NSApp.windows {
@@ -197,13 +199,13 @@ final class AutoTestRunner {
             workspace?.dropDatabase(nil)
             try await Task.sleep(nanoseconds: 500_000_000)
         case "menu":
-            // menu <title>: reports whether a main menu item is enabled for the front window.
+            // menu <title>: reports whether a main menu item is enabled for the front window, and its tooltip.
             let item = NSApp.mainMenu?.items.lazy.compactMap { $0.submenu?.items.first { $0.title == argument } }.first
             if let item, let action = item.action {
                 // A background app has no key window, so ask the front workspace window the way its menu would.
                 let target: Any? = workspace.flatMap { $0.responds(to: action) ? $0 : nil } ?? NSApp.target(forAction: action, to: nil, from: item)
                 let enabled = (target as? NSMenuItemValidation)?.validateMenuItem(item) ?? (target != nil)
-                record("  \(argument): \(enabled ? "enabled" : "disabled")")
+                record("  \(argument): \(enabled ? "enabled" : "disabled")" + (item.toolTip.map { " (\($0))" } ?? ""))
             } else {
                 record("  \(argument): not found")
             }
@@ -584,7 +586,7 @@ final class AutoTestRunner {
 
     /// Captures only Foxlume Query's frontmost window. `screencapture -l` renders materials exactly as on screen;
     /// when it is unavailable, the window is drawn offscreen instead (vibrant areas then render blank).
-    private func snapshot(named name: String) throws {
+    func snapshot(named name: String) throws {
         let window = frontWindow
         guard let window, let frameView = window.contentView?.superview else { throw DatabaseError.unsupported("No window to snapshot") }
         // A sheet can carry its own sheet, such as an alert over New Table.
