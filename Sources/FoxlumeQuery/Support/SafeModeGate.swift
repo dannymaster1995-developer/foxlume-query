@@ -22,12 +22,16 @@ enum SafeModeGate {
     ///   - writes: whether any of them changes data.
     ///   - action: the question's verb phrase, such as "Run 2 statements" or "Save 3 changes to users".
     ///   - extraDetail: lines shown above the statements, such as a missing primary key warning.
+    ///   - destructive: shows the question as a critical alert with a destructive button (ending a server session).
+    ///   - confirmTitle: the button's title instead of Run or Continue.
     static func authorize(
         config: ConnectionConfig,
         statements: [String],
         writes: Bool,
         action: String,
         extraDetail: String? = nil,
+        destructive: Bool = false,
+        confirmTitle: String? = nil,
         in window: NSWindow?,
         completion: @escaping (Bool) -> Void
     ) {
@@ -42,7 +46,7 @@ enum SafeModeGate {
             let shown = statements.prefix(6).map { $0.count > 300 ? String($0.prefix(300)) + "…" : $0 }
             lines.append(shown.joined(separator: ";\n") + (statements.count > 6 ? ";\n…" : ""))
         }
-        Alerts.confirm("\(action)?", detail: lines.joined(separator: "\n\n"), confirmTitle: writes ? "Run" : "Continue", in: window) { confirmed in
+        Alerts.confirm("\(action)?", detail: lines.joined(separator: "\n\n"), confirmTitle: confirmTitle ?? (writes ? "Run" : "Continue"), destructive: destructive, in: window) { confirmed in
             guard confirmed else { return completion(false) }
             guard level.requiresAuthentication, level.gates(writes: writes) else { return completion(true) }
             authenticate(reason: "run statements on \(config.displayName)", completion: completion)

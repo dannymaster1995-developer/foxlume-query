@@ -67,6 +67,10 @@ public protocol DatabaseConnection: AnyObject {
     /// Interrupt the statement currently running on this session.
     func cancel()
 
+    /// The server's id for this session: the PostgreSQL backend process id, the MySQL connection id. Nil before
+    /// `connect()` and for engines without one. Safe to read from any thread.
+    var serverProcessID: Int? { get }
+
     /// A cheap round trip that proves the link still answers.
     func ping() throws
     /// Shuts the socket down from another thread so a read blocked on a dead link returns. The link is unusable afterwards.
@@ -283,6 +287,8 @@ public extension DatabaseConnection {
 
     /// Local engines have no socket to shut down.
     func abort() {}
+
+    var serverProcessID: Int? { nil }
 
     func fetchRows(_ query: TableQuery) throws -> StatementResult {
         try execute(query.selectSQL(dialect: dialect), rowLimit: nil).last { $0.hasResultSet } ?? StatementResult()

@@ -66,6 +66,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **Functions, procedures, triggers and types** in the sidebar, with their source and "Edit in Query Tab".
 - **Rename and copy** on PostgreSQL: Rename Schema, Rename Database and Copy Database. Open tables, column layouts, ER layouts and filter presets follow the new name, and if someone else is connected to the database you are renaming or copying, Foxlume Query tells you who instead of failing halfway.
 - **Maintenance** from the sidebar (Shift-click to select several tables) or Database › Maintenance: Vacuum, Vacuum Analyze, Analyze, Vacuum Full and Reindex on PostgreSQL; Optimize, Analyze, Check and (MyISAM and Aria) Repair Table on MySQL and MariaDB; Analyze, Integrity Check and Vacuum on SQLite; Analyze and Checkpoint on DuckDB. Commands run one table at a time on a separate connection, so the rest of the app keeps working, and the server's answer, status and time of each table show as they finish, with Cancel.
+- **Server Activity** (Database › Server Activity, ⌥⌘A) on PostgreSQL, MySQL and MariaDB: every session on the server with its user, database, client, state and running statement, refreshed every 2 seconds, longest running first, with a filter, a Hide idle switch and Pause. Cancel a session's query or end the session (`pg_cancel_backend` / `pg_terminate_backend`, `KILL QUERY` / `KILL CONNECTION`) after a confirmation, never on Read-Only connections. Foxlume Query's own sessions are marked. **Slow Queries** lists the top statements by total or mean time from `pg_stat_statements` or `performance_schema`, when the server collects them, with Copy and Open in Query Tab.
 - **Views** for PostgreSQL, MySQL, MariaDB, SQLite and DuckDB: **New View** opens a `CREATE VIEW` template, **Edit View** opens the current definition ready to replace, and **Save View** runs it and selects the view in the sidebar. PostgreSQL materialized views can be edited and refreshed too.
 
 ### Import and export
@@ -97,9 +98,9 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 |---|---|
 | <img src="docs/images/current-statement.png" alt="The query editor shading the statement under the cursor in a script of three statements" width="420"> | <img src="docs/images/word-wrap-off.png" alt="The query editor with word wrap off, a long statement running past the right edge with a horizontal scroller" width="420"> |
 
-| Maintenance |
-|---|
-| <img src="docs/images/maintenance.png" alt="Optimize Table results for two MySQL tables, with the server's messages, status and time per table" width="420"> |
+| Maintenance | Server Activity |
+|---|---|
+| <img src="docs/images/maintenance.png" alt="Optimize Table results for two MySQL tables, with the server's messages, status and time per table" width="420"> | <img src="docs/images/server-activity.png" alt="Server Activity listing PostgreSQL sessions: one idle in a transaction, an UPDATE waiting for its lock and a long report query, with the selected statement below" width="420"> |
 
 </details>
 
@@ -192,6 +193,7 @@ The most used ones:
 | ⌥⌘↑ / ⌥⌘↓ | First / last page; in the structure editor's column list, move the selected columns up / down |
 | ⌘R / ⇧⌘R | Reload data / reload table list |
 | ⌘K | Switch database |
+| ⌥⌘A | Server Activity (sessions and slow queries) |
 | ⌥⌘1 / ⌥⌘2 | Data / Structure |
 | ⌘Y | Query history |
 | ⌃⌥⌘F | Focus the sidebar filter |

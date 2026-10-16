@@ -25,7 +25,15 @@ public final class DatabaseSession: @unchecked Sendable {
         self._parameters = parameters
         self.connection = ConnectionFactory.make(parameters)
         self.queue = DispatchQueue(label: "FoxlumeQuery.session.\(parameters.config.id.uuidString)", qos: .userInitiated)
+        SessionRegistry.shared.add(self)
     }
+
+    /// Every session of this process that is still alive, connected or not. Server Activity uses it to mark the app's
+    /// own sessions in the server's session list.
+    public static var liveSessions: [DatabaseSession] { SessionRegistry.shared.all }
+
+    /// The server's id for the current link (PostgreSQL backend pid, MySQL connection id); nil when not connected.
+    public var serverProcessID: Int? { isConnected ? currentConnection.serverProcessID : nil }
 
     public var kind: DatabaseKind { parameters.config.kind }
     public var dialect: SQLDialect { currentConnection.dialect }
@@ -276,6 +284,31 @@ public final class DatabaseSession: @unchecked Sendable {
 
     public func defaultSchema() async -> String? {
         (try? await run { $0.defaultSchema }) ?? nil
+    }
+}
+
+/// Weak references to every `DatabaseSession`, so it never keeps one alive.
+private final class SessionRegistry: @unchecked Sendable {
+    static let shared = SessionRegistry()
+
+    private struct Entry {
+        weak var session: DatabaseSession?
+    }
+
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+
+    func add(_ session: DatabaseSession) {
+        lock.lock()
+        defer { lock.unlock() }
+        entries.removeAll { $0.session == nil }
+        entries.append(Entry(session: session))
+    }
+
+    var all: [DatabaseSession] {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.compactMap(\.session)
     }
 }
 

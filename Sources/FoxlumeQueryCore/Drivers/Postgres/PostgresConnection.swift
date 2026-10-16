@@ -518,6 +518,13 @@ public final class PostgresConnection: DatabaseConnection, TLSReporting {
         return requested ? .cancelled : error.databaseError
     }
 
+    /// The backend process id from BackendKeyData, as `pg_backend_pid()` reports it.
+    public var serverProcessID: Int? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return backendKey.map { Int($0.processID) }
+    }
+
     /// Ask the server, over a separate connection, to interrupt the running statement. Safe from any thread.
     public func cancel() {
         stateLock.lock()

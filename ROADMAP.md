@@ -49,7 +49,7 @@ Schema and server:
 - [x] FQ-109 Column reorder and table comments in the structure editor
 - [x] FQ-110 Rename schemas (PostgreSQL); rename and copy databases where the server allows it
 - [x] FQ-111 Maintenance: VACUUM and ANALYZE (PostgreSQL), OPTIMIZE, ANALYZE and CHECK TABLE (MySQL)
-- [ ] FQ-112 Server activity: running sessions, cancel or kill a query, slow queries
+- [x] FQ-112 Server activity: running sessions, cancel or kill a query, slow queries
 
 Data in and out:
 - [ ] FQ-113 XLSX export; JSON and XLSX import

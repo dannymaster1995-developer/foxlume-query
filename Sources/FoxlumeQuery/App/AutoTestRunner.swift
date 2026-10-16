@@ -113,6 +113,8 @@ final class AutoTestRunner {
             try await performDatabases(command, argument)
         case _ where MaintenanceAutoTest.commands.contains(command):
             try await performMaintenance(command, argument)
+        case _ where ActivityAutoTest.commands.contains(command):
+            try await performActivity(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
             MaintenanceController.presented?.dismiss()

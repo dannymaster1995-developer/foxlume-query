@@ -9,9 +9,10 @@ extension ConnectionWorkspace {
 
     /// Opens a second session with the same settings, switched to the database (and read-only mode) in use.
     /// It runs the connection's startup commands but has no query timeout: exports, imports and Run file may take long.
-    func openTransferSession() async throws -> DatabaseSession {
+    /// `queryTimeout` gives it one instead (Server Activity polls with a short one).
+    func openTransferSession(queryTimeout: Int? = nil) async throws -> DatabaseSession {
         var parameters = self.session.parameters
-        parameters.config.queryTimeout = nil
+        parameters.config.queryTimeout = queryTimeout
         let session = DatabaseSession(parameters: parameters)
         do {
             try await session.connect()

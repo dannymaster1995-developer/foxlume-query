@@ -89,7 +89,8 @@ Sources/
       Transport/        TCP sockets with in-place TLS upgrade, SSH tunnel, connect deadlines
       TLS/              Network.framework TLS stream, PEM and key decoding, client identities, certificate checks
       Postgres/ MySQL/ SQLite/ DuckDB/ MongoDB/ Redis/
-    SQL/                dialects, statement splitting, table queries, change generation, formatter, maintenance commands
+    SQL/                dialects, statement splitting, table queries, change generation, formatter, maintenance commands,
+                        server activity (session list, cancel and terminate, slow query statistics)
     Completion/         query editor completion engines
     Storage/            connections, Keychain, history, saved queries, filter presets, diagram and column layouts, settings
     Grid/               sorting, paste parsing, selection figures, cell filters, column name matching, cell editor types,

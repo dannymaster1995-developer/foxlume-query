@@ -27,6 +27,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
     var onClose: ((WorkspaceWindowController) -> Void)?
     /// True while Rename or Copy Database runs (WorkspaceWindowController+Databases.swift).
     var isChangingDatabase = false
+    /// The Server Activity window while it is open (WorkspaceWindowController+Activity.swift).
+    var serverActivityController: ServerActivityWindowController?
     private var closingConfirmed = false
 
     init(workspace: ConnectionWorkspace) {
@@ -516,6 +518,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         tabs.saveState()
+        serverActivityController?.close()
         workspace.cancelEverything()
         let workspace = self.workspace
         Task { await workspace.disconnect() }
@@ -529,6 +532,7 @@ extension WorkspaceWindowController: NSMenuItemValidation {
         if let saved = validateSavedQueriesItem(menuItem.action) { return saved }
         if let diagram = validateDiagramItem(menuItem.action) { return diagram }
         if let maintenance = validateMaintenanceItem(menuItem) { return maintenance }
+        if let activity = validateActivityItem(menuItem) { return activity }
         let hasOperations = !workspace.pendingTableOperations.isEmpty
         switch menuItem.action {
         case #selector(saveAll(_:)):

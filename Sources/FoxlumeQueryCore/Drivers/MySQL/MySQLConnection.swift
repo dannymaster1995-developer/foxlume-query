@@ -369,6 +369,13 @@ public final class MySQLConnection: DatabaseConnection, TLSReporting {
         }
     }
 
+    /// The connection id from the server greeting, as `CONNECTION_ID()` reports it.
+    public var serverProcessID: Int? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return connectionID.map { Int($0) }
+    }
+
     /// Interrupts the running statement with `KILL QUERY` from a second, short-lived connection.
     public func cancel() {
         stateLock.lock()

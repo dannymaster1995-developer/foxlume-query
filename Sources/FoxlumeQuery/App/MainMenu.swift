@@ -71,6 +71,7 @@ import AppKit
     @objc optional func copyDatabase(_ sender: Any?)
     @objc optional func reportIssue(_ sender: Any?)
     @objc optional func showERDiagram(_ sender: Any?)
+    @objc optional func showServerActivity(_ sender: Any?)
     @objc optional func jumpToColumn(_ sender: Any?)
 }
 
@@ -169,6 +170,7 @@ enum MainMenu {
             .separator(),
             item("ER Diagram", #selector(FoxlumeQueryActions.showERDiagram(_:))),
             maintenance,
+            item("Server Activity", #selector(FoxlumeQueryActions.showServerActivity(_:)), "a", [.command, .option]),
             .separator(),
             item("Disconnect", #selector(FoxlumeQueryActions.disconnect(_:))),
             item("Reconnect", #selector(FoxlumeQueryActions.reconnect(_:))),
