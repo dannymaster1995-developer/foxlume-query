@@ -42,6 +42,8 @@ final class TabsViewController: NSViewController {
     var onSelectionChange: ((WorkspaceTab?) -> Void)?
     /// Where a source tab's Edit in Query Tab goes; set by the window.
     var onObjectCommand: ((SchemaObjectCommand) -> Void)?
+    /// A New View… or Edit View… tab created or replaced this view.
+    var onViewSaved: ((TableRef) -> Void)?
 
     init(workspace: ConnectionWorkspace) {
         self.workspace = workspace
@@ -130,9 +132,13 @@ final class TabsViewController: NSViewController {
     }
 
     @discardableResult
-    func openQuery(sql: String = "", run: Bool = false, title: String? = nil, fileURL: URL? = nil) -> QueryTabViewController {
+    func openQuery(sql: String = "", run: Bool = false, title: String? = nil, fileURL: URL? = nil, viewEditor: ViewEditorContext? = nil) -> QueryTabViewController {
         queryCounter += 1
         let controller = QueryTabViewController(workspace: workspace, title: title ?? "Query \(queryCounter)", sql: sql, fileURL: fileURL)
+        if let viewEditor {
+            controller.viewEditor = viewEditor
+            controller.onViewSaved = { [weak self] view in self?.onViewSaved?(view) }
+        }
         let tab = WorkspaceTab(content: controller, isPreview: false)
         tabs.append(tab)
         install(tab)

@@ -83,6 +83,15 @@ extension ConnectionWorkspace {
         try await tracked { try await session.run { try $0.definition(of: object) } }
     }
 
+    var viewSQL: ViewSQL { ViewSQL(kind: kind) }
+
+    /// Whether New View… and Edit View… are offered.
+    var canEditViews: Bool { viewSQL.supportsViews && !isReadOnly }
+
+    func viewDefinition(of view: TableRef) async throws -> ViewDefinition {
+        try await tracked { try await session.run { try $0.viewDefinition(of: view) } }
+    }
+
     func triggers(of table: TableRef) async throws -> [TriggerInfo] {
         try await tracked { try await session.run { try $0.triggers(of: table) } }
     }

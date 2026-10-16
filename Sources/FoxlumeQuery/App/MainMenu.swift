@@ -19,6 +19,7 @@ import AppKit
     @objc optional func refreshData(_ sender: Any?)
     @objc optional func refreshMetadata(_ sender: Any?)
     @objc optional func newTable(_ sender: Any?)
+    @objc optional func newView(_ sender: Any?)
     @objc optional func toggleFilters(_ sender: Any?)
     @objc optional func showDataView(_ sender: Any?)
     @objc optional func showStructureView(_ sender: Any?)
@@ -152,6 +153,7 @@ enum MainMenu {
             item("Refresh Table List", #selector(FoxlumeQueryActions.refreshMetadata(_:)), "r", [.command, .shift]),
             .separator(),
             item("New Table…", #selector(FoxlumeQueryActions.newTable(_:))),
+            item("New View…", #selector(FoxlumeQueryActions.newView(_:))),
             item("New Database…", #selector(FoxlumeQueryActions.newDatabase(_:))),
             item("Drop Database…", #selector(FoxlumeQueryActions.dropDatabase(_:))),
             item("New Schema…", #selector(FoxlumeQueryActions.newSchema(_:))),

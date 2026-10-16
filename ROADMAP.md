@@ -45,7 +45,7 @@ Editor and results:
 - [x] FQ-122 Tab bar overflow: show the tabs that fit (the selected and most recently used stay visible) and a "+N" button listing the rest; opening tabs never widens the window
 
 Schema and server:
-- [ ] FQ-108 Create and edit views
+- [x] FQ-108 Create and edit views
 - [ ] FQ-109 Column reorder and table comments in the structure editor
 - [ ] FQ-110 Rename schemas (PostgreSQL); rename and copy databases where the server allows it
 - [ ] FQ-111 Maintenance: VACUUM and ANALYZE (PostgreSQL), OPTIMIZE, ANALYZE and CHECK TABLE (MySQL)

@@ -104,6 +104,8 @@ public protocol DatabaseConnection: AnyObject {
     func schemaObjects(_ kind: SchemaObjectKind, schema: String?) throws -> [SchemaObject]
     /// The CREATE statement of an object listed by `schemaObjects`.
     func definition(of object: SchemaObject) throws -> SchemaObjectDefinition
+    /// The CREATE statement of a view or materialized view, with what is dropped along with it, for Edit View….
+    func viewDefinition(of view: TableRef) throws -> ViewDefinition
     /// Triggers of one table, for the Structure view.
     func triggers(of table: TableRef) throws -> [TriggerInfo]
     /// CHECK constraints of one table, for the Structure view. Empty where the server ignores CHECK.
@@ -246,6 +248,10 @@ public extension DatabaseConnection {
 
     func definition(of object: SchemaObject) throws -> SchemaObjectDefinition {
         throw DatabaseError.unsupported("\(kind.displayName) cannot show the definition of a \(object.kind.noun).")
+    }
+
+    func viewDefinition(of view: TableRef) throws -> ViewDefinition {
+        throw DatabaseError.unsupported("\(kind.displayName) cannot edit views.")
     }
 
     func triggers(of table: TableRef) throws -> [TriggerInfo] { [] }

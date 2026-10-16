@@ -142,7 +142,8 @@ extension WorkspaceWindowController {
         }
     }
 
-    private static func stack(_ views: [NSView]) -> NSView {
+    /// Fields of a prompt sheet, stacked at one width; also used by New View… (WorkspaceWindowController+Views.swift).
+    static func stack(_ views: [NSView]) -> NSView {
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading

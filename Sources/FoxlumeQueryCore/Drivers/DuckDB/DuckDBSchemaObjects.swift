@@ -35,6 +35,17 @@ extension DuckDBConnection {
         return SchemaObjectDefinition(statement: "CREATE OR REPLACE MACRO \(name)(\(Self.cell(row, 3) ?? "")) AS \(isTable ? "TABLE " : "")\(Self.cell(row, 4) ?? "")")
     }
 
+    /// duckdb_views() keeps the CREATE VIEW statement.
+    public func viewDefinition(of view: TableRef) throws -> ViewDefinition {
+        let filter = "database_name = current_database() AND schema_name = \(schemaExpression(view.schema)) AND view_name = \(dialect.quoteString(view.name))"
+        guard let row = try rows("SELECT schema_name, sql FROM duckdb_views() WHERE \(filter) AND NOT internal").first,
+              let statement = Self.cell(row, 1)
+        else {
+            throw DatabaseError.server(message: "View \(view.name) does not exist", code: nil)
+        }
+        return ViewDefinition(view: TableRef(schema: Self.cell(row, 0), name: view.name), statement: statement)
+    }
+
     public func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo] {
         try rows("""
             SELECT constraint_name, expression, array_to_string(constraint_column_names, ', ')

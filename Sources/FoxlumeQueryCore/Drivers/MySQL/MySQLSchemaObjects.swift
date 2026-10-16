@@ -12,6 +12,14 @@ extension MySQLConnection {
         }
     }
 
+    /// SHOW CREATE VIEW, with ALGORITHM, DEFINER and SQL SECURITY as the server keeps them.
+    public func viewDefinition(of view: TableRef) throws -> ViewDefinition {
+        guard let statement = try rows("SHOW CREATE VIEW \(dialect.qualifiedName(view))").first.flatMap({ Self.cell($0, 1) }) else {
+            throw DatabaseError.server(message: "The server returned no definition for \(view.name).", code: nil)
+        }
+        return ViewDefinition(view: view, statement: statement)
+    }
+
     /// The parameter list is built from information_schema.PARAMETERS (ordinal 0 is a function's return value).
     /// Functions leave out the IN mode every parameter has.
     private func routines(_ kind: SchemaObjectKind, database: String?) throws -> [SchemaObject] {

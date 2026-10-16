@@ -247,23 +247,43 @@ extension PostgresConnection {
     }
 
     private func viewDDL(_ relation: Relation) throws -> String {
-        let dialect = self.dialect
+        let parts = try viewParts(relation)
+        var blocks = [parts.create + ";"]
+        if !parts.indexes.isEmpty { blocks.append(parts.indexes.joined(separator: "\n")) }
+        if !parts.comments.isEmpty { blocks.append(parts.comments.joined(separator: "\n")) }
+        return blocks.joined(separator: "\n\n")
+    }
+
+    public func viewDefinition(of view: TableRef) throws -> ViewDefinition {
+        let relation = try relation(view)
+        guard relation.kind == "v" || relation.kind == "m" else {
+            throw DatabaseError.unsupported("\(dialect.qualifiedName(relation.ref)) is not a view.")
+        }
+        let parts = try viewParts(relation)
+        return ViewDefinition(view: relation.ref, isMaterialized: relation.kind == "m", statement: parts.create, attachedStatements: parts.comments + parts.indexes)
+    }
+
+    /// The CREATE statement with the view's options (`security_barrier`, `check_option`, a materialized view's storage
+    /// parameters) and WITH NO DATA for an unpopulated materialized view, then its indexes and comments.
+    private func viewParts(_ relation: Relation) throws -> (create: String, indexes: [String], comments: [String]) {
         let isMaterialized = relation.kind == "m"
         let objectType = isMaterialized ? "MATERIALIZED VIEW" : "VIEW"
-        let definition = try rows("SELECT pg_catalog.pg_get_viewdef(\(relation.oid)::pg_catalog.oid, true)")
-            .first?.first?.textValue ?? ""
-        var body = definition.trimmingCharacters(in: .whitespacesAndNewlines)
+        let row = try rows("""
+            SELECT pg_catalog.pg_get_viewdef(c.oid, true), pg_catalog.array_to_string(c.reloptions, ', '), c.relispopulated
+            FROM pg_catalog.pg_class c WHERE c.oid = \(relation.oid)
+            """).first ?? []
+        var body = (row.first?.textValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if body.hasSuffix(";") { body.removeLast() }
+        let options = row.count > 1 ? (row[1].textValue ?? "") : ""
+        let populated = row.count > 2 ? row[2].textValue != "f" : true
 
-        var blocks = ["CREATE \(objectType) \(dialect.qualifiedName(relation.ref)) AS\n\(body);"]
-        if isMaterialized {
-            let indexStatements = try otherIndexDefinitions(relation)
-            if !indexStatements.isEmpty { blocks.append(indexStatements.joined(separator: "\n")) }
-        }
+        var create = "CREATE \(objectType) \(dialect.qualifiedName(relation.ref))"
+        if !options.isEmpty { create += " WITH (\(options))" }
+        create += " AS\n\(body)"
+        if isMaterialized, !populated { create += "\nWITH NO DATA" }
+        let indexes = isMaterialized ? try otherIndexDefinitions(relation) : []
         let columns = try structure(of: relation).columns
-        let comments = commentStatements(relation, objectType: objectType, columns: columns)
-        if !comments.isEmpty { blocks.append(comments.joined(separator: "\n")) }
-        return blocks.joined(separator: "\n\n")
+        return (create, indexes, commentStatements(relation, objectType: objectType, columns: columns))
     }
 
     private func tableDDL(_ relation: Relation) throws -> String {

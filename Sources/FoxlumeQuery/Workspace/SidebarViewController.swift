@@ -21,6 +21,8 @@ final class SidebarViewController: NSViewController {
     var onRunSQLFile: (() -> Void)?
     /// "New Table…" from the context menu; offered only where structure can be changed.
     var onNewTable: (() -> Void)?
+    /// New View…, Edit View… or Refresh Materialized View; see WorkspaceWindowController+Views.swift.
+    var onViewCommand: ((ViewCommand) -> Void)?
     /// A procedure, function, trigger or type was opened (double-click, Return, Show Definition).
     var onOpenObject: ((SchemaObject) -> Void)?
     /// Copy Definition, Edit in Query Tab, Drop… or New Trigger… on an object or its group; see SidebarViewController+SchemaObjects.swift.
@@ -426,6 +428,18 @@ final class SidebarViewController: NSViewController {
     @objc private func menuNewTable(_ sender: Any?) {
         onNewTable?()
     }
+
+    @objc private func menuNewView(_ sender: Any?) {
+        onViewCommand?(.new)
+    }
+
+    @objc private func menuEditView(_ sender: Any?) {
+        if let info = menuTargetInfo { onViewCommand?(.edit(info)) }
+    }
+
+    @objc private func menuRefreshMaterializedView(_ sender: Any?) {
+        if let info = menuTargetInfo { onViewCommand?(.refresh(info)) }
+    }
 }
 
 /// A folder or key in the Redis key tree. Keys are grouped by the separator, folders first, both alphabetical.
@@ -662,6 +676,14 @@ extension SidebarViewController: NSMenuDelegate {
             menu.addItem(item("Copy Name", #selector(menuCopyName(_:))))
             menu.addItem(item("Copy Definition (DDL)", #selector(menuCopyDDL(_:))))
             menu.addItem(.separator())
+            if onViewCommand != nil, workspace.canEditViews, let info = menuTargetInfo, workspace.viewSQL.canEdit(info.kind) {
+                menu.addItem(item(info.kind == .materializedView ? "Edit Materialized View…" : "Edit View…", #selector(menuEditView(_:))))
+                if info.kind == .materializedView {
+                    menu.addItem(item("Refresh Materialized View", #selector(menuRefreshMaterializedView(_:))))
+                }
+                menu.addItem(item("New View…", #selector(menuNewView(_:))))
+                menu.addItem(.separator())
+            }
             if workspace.supportsTableTransfer, let info = menuTargetInfo {
                 menu.addItem(item("Export…", #selector(menuExport(_:))))
                 if info.kind == .table, !workspace.isReadOnly {
@@ -699,6 +721,9 @@ extension SidebarViewController: NSMenuDelegate {
         }
         if onNewTable != nil, workspace.canChangeStructure {
             menu.addItem(item("New Table…", #selector(menuNewTable(_:))))
+        }
+        if menuTarget == nil, onViewCommand != nil, workspace.canEditViews {
+            menu.addItem(item("New View…", #selector(menuNewView(_:))))
         }
         if menuTarget == nil, onShowERDiagram != nil, workspace.supportsERDiagram {
             menu.addItem(item("ER Diagram", #selector(menuShowERDiagram(_:))))

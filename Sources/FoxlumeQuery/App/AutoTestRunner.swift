@@ -99,6 +99,8 @@ final class AutoTestRunner {
             try await performGrid(command, argument)
         case _ where RoutinesAutoTest.commands.contains(command):
             try await performRoutines(command, argument)
+        case _ where ViewsAutoTest.commands.contains(command):
+            try await performViews(command, argument)
         case _ where TLSAutoTest.commands.contains(command):
             try await performTLS(command, argument)
         case _ where DiagramsAutoTest.commands.contains(command):

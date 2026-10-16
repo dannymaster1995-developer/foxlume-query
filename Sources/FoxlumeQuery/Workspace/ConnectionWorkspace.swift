@@ -239,7 +239,8 @@ final class ConnectionWorkspace {
     }
 
     /// Run SQL and record it in the query history. Pass a token to make this statement cancellable on its own.
-    func execute(_ sql: String, rowLimit: Int? = nil, recordHistory: Bool = true, token: QueryToken? = nil) async throws -> [StatementResult] {
+    /// `transactional` runs the statements in one transaction that rolls back when one fails (Save View).
+    func execute(_ sql: String, rowLimit: Int? = nil, recordHistory: Bool = true, token: QueryToken? = nil, transactional: Bool = false) async throws -> [StatementResult] {
         if config.readOnly, !writeStatements(in: sql).isEmpty {
             throw DatabaseError.unsupported("This connection is read-only. Statements that change data are not run.")
         }
@@ -252,7 +253,9 @@ final class ConnectionWorkspace {
         }
         let started = Date()
         do {
-            let results = try await session.execute(sql, rowLimit: rowLimit, token: token)
+            let results = transactional
+                ? try await session.executeTransaction(queryLanguage.split(sql).map(\.text), token: token)
+                : try await session.execute(sql, rowLimit: rowLimit, token: token)
             if recordHistory {
                 let rows = results.last(where: \.hasResultSet)?.rows.count ?? results.last?.affectedRows
                 AppEnvironment.history.add(sql: sql, connectionID: config.id, database: currentDatabase, duration: Date().timeIntervalSince(started), rowCount: rows, error: nil)

@@ -26,6 +26,19 @@ extension SQLiteConnection {
         return SchemaObjectDefinition(statement: text)
     }
 
+    /// sqlite_master keeps the CREATE VIEW as it was typed. Triggers on the view (INSTEAD OF) go with it on DROP.
+    public func viewDefinition(of view: TableRef) throws -> ViewDefinition {
+        let name = dialect.quoteString(view.name)
+        guard let statement = try execute("SELECT sql FROM sqlite_master WHERE type = 'view' AND name = \(name)", rowLimit: nil)
+            .first?.rows.first?.first?.textValue
+        else {
+            throw DatabaseError.server(message: "no such view: \(view.name)", code: nil)
+        }
+        let triggers = try execute("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = \(name) AND sql IS NOT NULL ORDER BY name", rowLimit: nil)
+            .first?.rows.compactMap { $0.first?.textValue } ?? []
+        return ViewDefinition(view: TableRef(name: view.name), statement: statement, attachedStatements: triggers)
+    }
+
     public func triggers(of table: TableRef) throws -> [TriggerInfo] {
         try triggerRows(table: table.name).compactMap { row in
             guard let name = row[0].textValue else { return nil }

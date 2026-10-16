@@ -13,6 +13,11 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     var hasUnsavedChanges: Bool { fileURL != nil && editor.string != savedText }
     private var savedText = ""
     private var runToken: QueryToken?
+    /// Set for tabs opened by New View… and Edit View…; see QueryTabViewController+Views.swift.
+    var viewEditor: ViewEditorContext?
+    /// A run in a view tab created or replaced this view.
+    var onViewSaved: ((TableRef) -> Void)?
+    private(set) lazy var saveViewButton = UI.button("Save View", symbol: "checkmark.circle", target: self, action: #selector(saveView(_:)))
 
     private let initialSQL: String
     private let editor = SQLEditorView()
@@ -79,7 +84,8 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         formatButton.toolTip = "Format the selection or the whole query (⇧⌘L)"
         formatButton.isHidden = !workspace.kind.isSQL
         saveQueryButton.setAccessibilityIdentifier("addToSavedQueries")
-        let toolbar = UI.hstack([runButton, runAllButton, stopButton, explainControl, UI.separator(vertical: true), formatButton, saveQueryButton, UI.flexibleSpace(), limitLabel], spacing: 6)
+        let viewControls = viewEditorControls()
+        let toolbar = UI.hstack(viewControls.leading + [runButton, runAllButton, stopButton, explainControl, UI.separator(vertical: true), formatButton, saveQueryButton, UI.flexibleSpace(), viewControls.trailing ?? limitLabel], spacing: 6)
         let toolbarContainer = NSView()
         toolbarContainer.translatesAutoresizingMaskIntoConstraints = false
         toolbarContainer.addSubviewFilling(toolbar, insets: NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10))
@@ -276,6 +282,18 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         focusEditor()
     }
 
+    /// Replaces the whole text as one undoable change.
+    func replaceSQL(_ text: String, actionName: String) {
+        let textView = editor.textView
+        let all = NSRange(location: 0, length: (textView.string as NSString).length)
+        guard textView.shouldChangeText(in: all, replacementString: text) else { return }
+        textView.replaceCharacters(in: all, with: text)
+        textView.didChangeText()
+        textView.undoManager?.setActionName(actionName)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+    }
+
     /// Adds `text` after the current text, a blank line apart, as one undoable change.
     func appendSQL(_ text: String) {
         let textView = editor.textView
@@ -357,8 +375,8 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         statusLabel.stringValue = "Cancelling…"
     }
 
-    /// `onStart` runs once the statements are confirmed and sent.
-    private func run(_ sql: String, unlimited: Bool = false, onStart: (() -> Void)? = nil) {
+    /// `onStart` runs once the statements are confirmed and sent. `transactional` runs them in one transaction.
+    func run(_ sql: String, unlimited: Bool = false, transactional: Bool = false, onStart: (() -> Void)? = nil) {
         guard !isRunning else { return NSSound.beep() }
         if workspace.kind.isSQL, AppEnvironment.settings.confirmUnboundedWrites {
             let unbounded = workspace.queryLanguage.split(sql).filter { SQLStatementSplitter.unboundedWrite($0.text) != nil }
@@ -370,16 +388,16 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
                     destructive: true,
                     in: view.window
                 ) { [weak self] confirmed in
-                    if confirmed { self?.runAfterSafetyChecks(sql, unlimited: unlimited, onStart: onStart) }
+                    if confirmed { self?.runAfterSafetyChecks(sql, unlimited: unlimited, transactional: transactional, onStart: onStart) }
                 }
                 return
             }
         }
-        runAfterSafetyChecks(sql, unlimited: unlimited, onStart: onStart)
+        runAfterSafetyChecks(sql, unlimited: unlimited, transactional: transactional, onStart: onStart)
     }
 
     /// Production confirmation, then execution.
-    private func runAfterSafetyChecks(_ sql: String, unlimited: Bool, onStart: (() -> Void)?) {
+    private func runAfterSafetyChecks(_ sql: String, unlimited: Bool, transactional: Bool, onStart: (() -> Void)?) {
         let limit: Int? = unlimited ? nil : AppEnvironment.settings.queryRowLimit
         let writes = workspace.writeStatements(in: sql)
         let all = workspace.queryLanguage.split(sql).map(\.text)
@@ -394,12 +412,12 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
             in: view.window
         ) { [weak self] confirmed in
             guard confirmed, let self else { return }
-            self.execute(sql, limit: limit)
+            self.execute(sql, limit: limit, transactional: transactional)
             onStart?()
         }
     }
 
-    private func execute(_ sql: String, limit: Int?) {
+    private func execute(_ sql: String, limit: Int?, transactional: Bool) {
         isRunning = true
         runError = nil
         explainOutcome = nil
@@ -409,7 +427,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         runToken = token
         Task {
             do {
-                let output = try await workspace.execute(sql, rowLimit: limit, token: token)
+                let output = try await workspace.execute(sql, rowLimit: limit, token: token, transactional: transactional)
                 results = output
             } catch {
                 results = []
@@ -420,6 +438,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
             isRunning = false
             updateRunningState()
             renderResults()
+            if viewEditor != nil { viewRunFinished(sql: sql, error: runError) }
         }
     }
 
@@ -461,6 +480,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     private func updateRunningState() {
         runButton.isEnabled = !isRunning
         runAllButton.isEnabled = !isRunning
+        saveViewButton.isEnabled = !isRunning
         stopButton.isEnabled = isRunning
         updateExplainControl()
         if isRunning {

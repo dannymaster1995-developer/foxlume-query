@@ -213,3 +213,25 @@ public struct SchemaObjectDefinition: Hashable, Sendable {
         self.canReplaceTrigger = canReplaceTrigger
     }
 }
+
+/// A view's definition as the server keeps it, for Edit View…; see ViewSQL.swift.
+public struct ViewDefinition: Hashable, Sendable {
+    public var view: TableRef
+    public var isMaterialized: Bool
+    /// The CREATE statement without a trailing semicolon: PostgreSQL rebuilt from `pg_get_viewdef` with the view's
+    /// options (and WITH NO DATA for an unpopulated materialized view), MySQL and MariaDB `SHOW CREATE VIEW` with
+    /// ALGORITHM, DEFINER and SQL SECURITY, SQLite `sqlite_master.sql`, DuckDB `duckdb_views().sql`.
+    public var statement: String
+    /// What goes away with the view when it is dropped, to be created again after it: PostgreSQL comments (the
+    /// view's own first) and materialized view indexes, SQLite triggers on the view. Each ends with a semicolon.
+    public var attachedStatements: [String]
+
+    public init(view: TableRef, isMaterialized: Bool = false, statement: String, attachedStatements: [String] = []) {
+        self.view = view
+        self.isMaterialized = isMaterialized
+        var text = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        while text.hasSuffix(";") { text = String(text.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines) }
+        self.statement = text
+        self.attachedStatements = attachedStatements.map { SchemaObjectSQL.terminated($0) }
+    }
+}

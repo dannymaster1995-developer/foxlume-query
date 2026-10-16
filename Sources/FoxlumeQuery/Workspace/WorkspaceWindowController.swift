@@ -82,6 +82,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         sidebar.onImportCSV = { [weak self] table in self?.presentImportCSV(into: table) }
         sidebar.onRunSQLFile = { [weak self] in self?.presentRunSQLFile(file: nil) }
         sidebar.onNewTable = { [weak self] in self?.newTable(nil) }
+        sidebar.onViewCommand = { [weak self] command in self?.performViewCommand(command) }
+        tabs.onViewSaved = { [weak self] view in self?.selectSavedView(view) }
         sidebar.onOpenObject = { [weak self] object in self?.openObjectSource(object) }
         sidebar.onObjectCommand = { [weak self] command in self?.performObjectCommand(command) }
         tabs.onObjectCommand = { [weak self] command in self?.performObjectCommand(command) }
@@ -532,6 +534,8 @@ extension WorkspaceWindowController: NSMenuItemValidation {
             return databaseObjects.canManageSchemas && !workspace.isReadOnly && workspace.connectionState == .connected
         case #selector(newTable(_:)):
             return workspace.canChangeStructure && workspace.connectionState == .connected
+        case #selector(newView(_:)):
+            return workspace.canEditViews && workspace.connectionState == .connected
         case #selector(disconnect(_:)):
             return workspace.connectionState == .connected
         case #selector(reconnect(_:)):

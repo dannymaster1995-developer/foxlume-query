@@ -64,6 +64,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **ER diagrams** of a whole schema, with crow's-foot relationships, drag-to-arrange layouts that are remembered, and PNG or PDF export.
 - **A structure editor** for PostgreSQL and MySQL: add or change columns, indexes, foreign keys and comments, review the generated `ALTER` statements, then save. **New Table** builds a `CREATE TABLE` with a live preview.
 - **Functions, procedures, triggers and types** in the sidebar, with their source and "Edit in Query Tab".
+- **Views** for PostgreSQL, MySQL, MariaDB, SQLite and DuckDB: **New View** opens a `CREATE VIEW` template, **Edit View** opens the current definition ready to replace, and **Save View** runs it and selects the view in the sidebar. PostgreSQL materialized views can be edited and refreshed too.
 
 ### Import and export
 
