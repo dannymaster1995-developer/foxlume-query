@@ -12,7 +12,7 @@ import FoxlumeQueryCore
 final class AutoTestRunner {
     private(set) weak var app: AppDelegate?
     private let commands: [String]
-    private let snapshotDirectory: URL
+    private(set) var snapshotDirectory: URL
     private var log: [String] = []
 
     init(app: AppDelegate, script: String) {
@@ -289,7 +289,7 @@ final class AutoTestRunner {
             guard let workspace, let info = workspace.workspace.tables.first(where: { $0.name == argument }) else { throw DatabaseError.unsupported("sidebarmenu <table>") }
             record("  " + workspace.sidebarMenuTitles(for: info).joined(separator: " | "))
         case "query":
-            workspace?.tabs.openQuery(sql: Self.queryText(argument))
+            workspace?.tabs.openQuery(sql: try Self.insertingFileHex(Self.queryText(argument)))
         case "run":
             (workspace?.tabs.selectedTab?.content as? QueryTabViewController)?.runAll(nil)
             try await waitForIdle()
@@ -366,6 +366,18 @@ final class AutoTestRunner {
         default:
             throw DatabaseError.unsupported("Unknown command \(command)")
         }
+    }
+
+    /// Replaces each `{{hexfile:/absolute/path}}` in a query with the file's bytes as hex digits, so scripts can seed
+    /// binary columns from fixtures (`decode('{{hexfile:…}}', 'hex')`, `UNHEX('{{hexfile:…}}')`).
+    static func insertingFileHex(_ sql: String) throws -> String {
+        var result = sql
+        while let start = result.range(of: "{{hexfile:"), let end = result.range(of: "}}", range: start.upperBound..<result.endIndex) {
+            let path = String(result[start.upperBound..<end.lowerBound])
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            result.replaceSubrange(start.lowerBound..<end.upperBound, with: data.hexString)
+        }
+        return result
     }
 
     /// The SQL of a `query` command: `\\n` is a newline; everything else, a regex `\\s` included, is kept.
@@ -592,7 +604,7 @@ final class AutoTestRunner {
         return process.terminationStatus == 0 && FileManager.default.fileExists(atPath: url.path)
     }
 
-    private func write(view: NSView, to url: URL) throws {
+    func write(view: NSView, to url: URL) throws {
         view.layoutSubtreeIfNeeded()
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)

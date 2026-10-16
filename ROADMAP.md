@@ -37,11 +37,12 @@ Data grid:
 - [x] FQ-102 Copy rows as an IN list or as UPDATE statements
 - [x] FQ-103 Columns: hide and show, jump to column, size to fit, remembered layout
 - [x] FQ-104 Cell editors: date and time picker, enum list, boolean toggle, foreign key value picker
-- [ ] FQ-105 Value viewers: JSON tree, image preview, hex
+- [x] FQ-105 Value viewers: JSON tree, image preview, hex
 
 Editor and results:
 - [ ] FQ-106 Highlight the current statement, word wrap, run and move to the next statement (⌃⌘↩)
 - [ ] FQ-107 Per-connection query timeout and startup commands
+- [ ] FQ-122 Tab bar overflow: show the tabs that fit (the selected and most recently used stay visible) and a "+N" button listing the rest; opening tabs never widens the window
 
 Schema and server:
 - [ ] FQ-108 Create and edit views

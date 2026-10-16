@@ -503,7 +503,7 @@ final class DataGridView: NSView {
         guard let window, row < content.displayRowCount, column < content.columns.count else { return }
         let value = content.currentValue(row: row, column: column) ?? .null
         let editable = isEditable && !content.changes.deletions.contains(row) && !isImmutable(column)
-        let editor = ValueEditorController(column: content.columns[column].name, value: value, editable: editable) { [weak self] edited in
+        let editor = ValueEditorController(column: content.columns[column].name, typeName: content.columns[column].typeName, value: value, editable: editable) { [weak self] edited in
             guard let self else { return }
             var newValue = edited
             if case .bytes = value, case .text(let text) = edited, let data = Data(hexLiteral: text) {

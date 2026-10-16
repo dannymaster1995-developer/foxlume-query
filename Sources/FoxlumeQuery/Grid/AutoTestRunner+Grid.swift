@@ -41,6 +41,19 @@ import FoxlumeQueryCore
 ///     cellpickdate <yyyy-mm-dd>|- [<hh:mm:ss>]   picks a day and a time in the date panel
 ///     cellnow / cellnull / celldone     the date panel's Now (Today), NULL and Done buttons
 ///     boxclick <row> <column>           a click on the check box of a boolean cell
+///     viewvalue <row> <column>          opens the value viewer of a cell (View Value… / Edit Value…) and logs how long it took
+///     viewer                            logs the open viewer: modes, current mode, footer and what the mode shows
+///     viewermode text|json|image|hex    a click on that segment
+///     viewertype <text>                 replaces the Text mode's text as typing would; \n is a new line
+///     jsonexpand / jsoncollapse         Expand All / Collapse All of the JSON tree
+///     jsonsearch <text>|-               types into the tree's search field (`-` clears it)
+///     jsonselect <row>                  selects a row of the tree (from 0)
+///     jsoncopy value|path               Copy Value / Copy Path of the selected rows and logs the clipboard
+///     hexselect <start> <length>        selects bytes in the hex view; hexcopy copies them and logs the clipboard
+///     viewersave <path> [<compare>]     writes the value's bytes as Save As… does, logs whether they equal the file `compare`,
+///                                       then removes the written file
+///     viewersnapshot <name.png>         captures the viewer sheet alone
+///     viewerclose                       Close / Cancel
 @MainActor
 enum GridAutoTest {
     static let commands: Set<String> = [
@@ -49,6 +62,8 @@ enum GridAutoTest {
         "presetsave", "presetapply", "presetdelete", "presetlist", "deleteselected", "duplicateselected",
         "columnlayout", "headeraction", "showcolumn", "resizecolumn", "movecolumn", "jumpcolumn", "columnslist", "closetab",
         "editors", "celledit", "celleditor", "celltype", "cellcommand", "cellpick", "cellpickdate", "cellnow", "cellnull", "celldone", "boxclick",
+        "viewvalue", "viewer", "viewermode", "viewertype", "jsonexpand", "jsoncollapse", "jsonsearch", "jsonselect", "jsoncopy",
+        "hexselect", "hexcopy", "viewersave", "viewersnapshot", "viewerclose",
     ]
 }
 
@@ -233,6 +248,9 @@ extension AutoTestRunner {
             }
         case "editors", "celledit", "celleditor", "celltype", "cellcommand", "cellpick", "cellpickdate", "cellnow", "cellnull", "celldone", "boxclick":
             try await performCellEditor(command, argument, grid: grid, column: column, cell: cell)
+        case "viewvalue", "viewer", "viewermode", "viewertype", "jsonexpand", "jsoncollapse", "jsonsearch", "jsonselect", "jsoncopy",
+             "hexselect", "hexcopy", "viewersave", "viewersnapshot", "viewerclose":
+            try await performValueViewer(command, argument, grid: grid, column: column)
         case "deleteselected":
             tableTab?.deleteSelectedRows(nil)
         case "duplicateselected":

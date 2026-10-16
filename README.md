@@ -46,6 +46,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **Spreadsheet-style editing:** select ranges, copy as TSV, paste from Excel or CSV, fill a column, set cells to NULL, an empty string, DEFAULT or the current timestamp (Set Value in the cell menu), see sum and average of the selection. Copy rows as CSV, JSON, Markdown, SQL INSERT or UPDATE statements, or a column's values as an `IN (…)` list. Every change waits for ⌘S, and Preview SQL (⇧⌘P) shows exactly what will run.
 - **Editors that know the column type:** booleans are check boxes (Space or a click toggles them), dates and times open a date picker with Now and NULL, enum columns (PostgreSQL enum types, MySQL and MariaDB `ENUM`) list their values, and foreign key columns offer a searchable list of the referenced rows. Typing a value by hand always works too.
 - **Arrange columns:** drag to reorder, hide columns or pick them from a checklist, size them to fit (or double-click a divider), and jump to a column by typing its name (⌃⌘J). Each table remembers its column order, widths and hidden columns.
+- **Look inside values:** View Value (⌥↩) shows JSON as a tree you can filter, with Copy Value and Copy Path (`$.items[2].name`); previews images and PDFs stored in binary columns (PNG, JPEG, GIF, WebP, HEIC, TIFF, BMP) with Save As for the original bytes; and dumps any binary value as offset, hex and ASCII, fast even for blobs of many megabytes.
 - **Follow foreign keys** with one click, inspect a row in the Row Inspector (⌥⌘I), and find text in results or across the whole table.
 
 ### Understand your queries
@@ -83,9 +84,9 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 |---|---|
 | <img src="docs/images/open-quickly.png" alt="Open Quickly fuzzy search over tables and history" width="420"> | <img src="docs/images/structure-editor.png" alt="Structure editor for a PostgreSQL table" width="420"> |
 
-| ER diagram (light) | |
+| ER diagram (light) | Value viewer |
 |---|---|
-| <img src="docs/images/er-diagram-light.png" alt="ER diagram in light appearance" width="420"> | |
+| <img src="docs/images/er-diagram-light.png" alt="ER diagram in light appearance" width="420"> | <img src="docs/images/value-viewer.png" alt="A jsonb value shown as an expandable JSON tree with key, value and type columns" width="420"> |
 
 </details>
 

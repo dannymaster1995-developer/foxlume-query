@@ -91,7 +91,8 @@ Sources/
     SQL/                dialects, statement splitting, table queries, change generation, formatter
     Completion/         query editor completion engines
     Storage/            connections, Keychain, history, saved queries, filter presets, diagram and column layouts, settings
-    Grid/               sorting, paste parsing, selection figures, cell filters, column name matching, cell editor types
+    Grid/               sorting, paste parsing, selection figures, cell filters, column name matching, cell editor types,
+                        value viewer helpers (view modes, JSON tree and paths, image signatures, hex dump lines)
     Search/             Open Quickly matching and ranking
     Explain/            query plan model, parsers per engine, analysis, plan diagram layout
     Diagram/            ER diagram graph and layout
