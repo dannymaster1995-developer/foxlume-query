@@ -103,12 +103,13 @@ enum RenamePrompt {
     }
 }
 
-/// Read-only, highlighted view of the statements Save would run (⇧⌘P).
+/// Read-only, highlighted view of the statements Save would run (⇧⌘P), under a warning when the script does
+/// something heavy, such as rebuilding a table.
 @MainActor
 final class SQLPreviewSheet: NSWindowController {
     private let editor = SQLEditorView()
 
-    init(text: String, language: QueryLanguage) {
+    init(text: String, language: QueryLanguage, warning: String? = nil) {
         let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.title = "Preview"
         window.minSize = NSSize(width: 420, height: 240)
@@ -121,6 +122,7 @@ final class SQLPreviewSheet: NSWindowController {
         editor.setAccessibilityIdentifier("previewSQL")
 
         let title = UI.label("Statements Save will run", size: 13, weight: .semibold)
+        let banner = Self.warningBanner(warning)
         let copy = UI.button("Copy", target: self, action: #selector(copyText(_:)))
         let close = UI.button("Close", target: self, action: #selector(closeSheet(_:)))
         close.keyEquivalent = "\r"
@@ -132,7 +134,7 @@ final class SQLPreviewSheet: NSWindowController {
         let content = NSView()
         content.wantsLayer = true
         content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        for view in [title, editor, buttons, cancelShortcut] {
+        for view in [title, banner, editor, buttons, cancelShortcut] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -146,7 +148,10 @@ final class SQLPreviewSheet: NSWindowController {
         NSLayoutConstraint.activate([
             title.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             title.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-            editor.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 10),
+            banner.topAnchor.constraint(equalTo: title.bottomAnchor, constant: warning == nil ? 0 : 10),
+            banner.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            banner.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            editor.topAnchor.constraint(equalTo: banner.bottomAnchor, constant: 10),
             editor.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             editor.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             editor.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -12),
@@ -162,6 +167,27 @@ final class SQLPreviewSheet: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    /// A warning sign and the text in orange, or an empty view of no height.
+    private static func warningBanner(_ warning: String?) -> NSView {
+        guard let warning else {
+            let empty = NSView()
+            empty.heightAnchor.constraint(equalToConstant: 0).isActive = true
+            return empty
+        }
+        let icon = NSImageView(image: NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning") ?? NSImage())
+        icon.contentTintColor = .systemOrange
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        let text = NSTextField(wrappingLabelWithString: warning)
+        text.font = .systemFont(ofSize: 12, weight: .medium)
+        text.textColor = .systemOrange
+        text.setAccessibilityIdentifier("previewWarning")
+        let row = NSStackView(views: [icon, text])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 8
+        return row
     }
 
     func begin(for parent: NSWindow) {

@@ -754,6 +754,11 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         loadPage()
     }
 
+    /// Shown above the preview when Save does something heavy, such as rebuilding the table.
+    var previewWarning: String? {
+        structureMode ? structureController.previewWarning : nil
+    }
+
     /// What Save would run for the grid edits, for Preview SQL. Nil without edits.
     func previewOfPendingChanges() -> String? {
         if structureMode { return structureController.previewOfPendingChanges() }

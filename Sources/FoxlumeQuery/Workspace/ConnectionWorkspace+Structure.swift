@@ -40,10 +40,11 @@ extension ConnectionWorkspace {
 }
 
 /// Asks to run a schema script, showing every statement, as the confirmation before Save and Create. The Safe Mode
-/// levels that need it then ask for Touch ID or the login password.
+/// levels that need it then ask for Touch ID or the login password. A `warning` (a table rebuild) comes first and
+/// makes the alert critical.
 @MainActor
 enum SchemaScriptPrompt {
-    static func confirm(title: String, statements: [String], workspace: ConnectionWorkspace, confirmTitle: String, in window: NSWindow?, handler: @escaping (Bool) -> Void) {
+    static func confirm(title: String, statements: [String], workspace: ConnectionWorkspace, confirmTitle: String, warning: String? = nil, in window: NSWindow?, handler: @escaping (Bool) -> Void) {
         let level = SafeModeGate.level(for: workspace.config)
         let handler: (Bool) -> Void = { confirmed in
             guard confirmed, level.requiresAuthentication, level.gates(writes: true) else { return handler(confirmed) }
@@ -62,8 +63,8 @@ enum SchemaScriptPrompt {
         } else if statements.count > 1 {
             notes.append("MySQL commits each statement on its own; if one fails, the ones before it stay applied.")
         }
-        alert.informativeText = notes.joined(separator: " ")
-        alert.alertStyle = workspace.config.environment == .production ? .critical : .warning
+        alert.informativeText = ([warning].compactMap { $0 } + [notes.joined(separator: " ")]).filter { !$0.isEmpty }.joined(separator: "\n\n")
+        alert.alertStyle = workspace.config.environment == .production || warning != nil ? .critical : .warning
         let confirm = alert.addButton(withTitle: confirmTitle)
         confirm.hasDestructiveAction = workspace.config.environment == .production
         alert.addButton(withTitle: "Cancel")

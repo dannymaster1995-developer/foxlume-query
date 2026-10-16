@@ -357,7 +357,8 @@ final class AutoTestRunner {
         case "about":
             app?.showAbout(nil)
         case "newtable", "newtablename", "newtablecomment", "newtablesection", "newtablecreate", "structureadd", "structureset",
-             "structuredelete", "structurecomment", "structuresave", "structurestate", "confirm", "sidebarbackgroundmenu", "sheettext":
+             "structuredelete", "structurecomment", "structuresave", "structurestate", "structuremove", "structuremenu", "structuremenuitem",
+             "structurekey", "confirm", "sidebarbackgroundmenu", "sheettext":
             try await performStructureCommand(command, argument)
         case "snapshot":
             try snapshot(named: argument.isEmpty ? "snapshot-\(log.count).png" : argument)
@@ -458,6 +459,42 @@ final class AutoTestRunner {
             draftEditor?.toggleDeletion(IndexSet(integer: Int(argument) ?? 0))
         case "structurecomment":
             tableTab?.structureView.setTableComment(argument == "-" ? "" : argument)
+        case "structuremove":
+            // structuremove <rows> <destination>: drops rows (comma-separated, from 0) above a row, as a drag would.
+            let pieces = argument.split(separator: " ").map(String.init)
+            let rows = IndexSet((pieces.first ?? "").split(separator: ",").compactMap { Int($0) })
+            guard pieces.count == 2, let destination = Int(pieces[1]), !rows.isEmpty else { throw DatabaseError.unsupported("structuremove <rows> <destination>") }
+            if draftEditor?.table.moveRows(rows, to: destination) != true { record("  refused: " + (tableTab?.structureView.reorderBlocker ?? "not movable")) }
+        case "structuremenu":
+            // Logs the context menu of a row: disabled items in brackets, with their tooltip.
+            guard let editor = draftEditor, let row = Int(argument) else { throw DatabaseError.unsupported("structuremenu <row>") }
+            editor.table.select(row: row)
+            let items = editor.table.menuItems?(IndexSet(integer: row)) ?? []
+            record("  menu: " + items.filter { !$0.isSeparatorItem }.map { item in
+                item.isEnabled ? item.title : "[\(item.title)]" + (item.toolTip.map { " (\($0))" } ?? "")
+            }.joined(separator: " | "))
+        case "structuremenuitem":
+            // structuremenuitem <row> <title>: chooses an item of that row's context menu.
+            let pieces = argument.split(separator: " ", maxSplits: 1).map(String.init)
+            guard let editor = draftEditor, pieces.count == 2, let row = Int(pieces[0]) else { throw DatabaseError.unsupported("structuremenuitem <row> <title>") }
+            editor.table.select(row: row)
+            guard let item = (editor.table.menuItems?(IndexSet(integer: row)) ?? []).first(where: { $0.title == pieces[1] }), let action = item.action else {
+                throw DatabaseError.unsupported("No menu item \(pieces[1])")
+            }
+            if item.isEnabled { NSApp.sendAction(action, to: item.target, from: item) } else { record("  disabled: \(item.title)") }
+        case "structurekey":
+            // structurekey <row> up|down: ⌥⌘↑ / ⌥⌘↓ with the row selected and the list focused.
+            let pieces = argument.split(separator: " ").map(String.init)
+            guard let editor = draftEditor, pieces.count == 2, let row = Int(pieces[0]), let window = editor.window else { throw DatabaseError.unsupported("structurekey <row> up|down") }
+            editor.table.select(row: row)
+            window.makeFirstResponder(editor.table.tableView)
+            let up = pieces[1] == "up"
+            let characters = up ? "\u{F700}" : "\u{F701}"
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .option, .numericPad, .function], timestamp: 0,
+                                               windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                                               isARepeat: false, keyCode: up ? 126 : 125)
+            else { return }
+            if !window.performKeyEquivalent(with: event) { record("  key not handled") }
         case "structuresave":
             tableTab?.saveChanges(nil)
             try await Task.sleep(nanoseconds: 500_000_000)

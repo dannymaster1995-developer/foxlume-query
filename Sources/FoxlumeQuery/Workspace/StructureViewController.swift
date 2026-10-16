@@ -26,6 +26,9 @@ final class StructureViewController: NSViewController {
     /// The editor, for engines that support structure editing. Read-only structures use the grid.
     private(set) var editor: StructureDraftEditor?
     private(set) var isSaving = false
+    /// What a PostgreSQL column reorder needs, read with the structure; nil until read or for other engines.
+    private(set) var rebuildInfo: TableRebuildInfo?
+    private var rebuildInfoError: String?
 
     /// Whether the tab allows changes now: not read-only, not a view, still on the database it was opened from.
     var canEdit: () -> Bool = { false }
@@ -155,6 +158,7 @@ final class StructureViewController: NSViewController {
         workspace.invalidateStructure(of: table)
         structure = nil
         ddl = nil
+        rebuildInfo = nil
         resetExtras()
         load(force: true)
     }
@@ -178,6 +182,7 @@ final class StructureViewController: NSViewController {
                     } else {
                         installEditor(draft: draft, generator: generator)
                     }
+                    if force || rebuildInfo == nil { loadRebuildInfo() }
                 }
                 render()
             } catch {
@@ -186,8 +191,33 @@ final class StructureViewController: NSViewController {
         }
     }
 
+    /// PostgreSQL reorders columns by rebuilding the table; whether that is safe is read once per load.
+    private var reordersByRebuild: Bool { workspace.structureGenerator?.dialect.family == .postgresql }
+
+    private func loadRebuildInfo() {
+        guard reordersByRebuild else { return }
+        rebuildInfo = nil
+        rebuildInfoError = nil
+        Task {
+            do {
+                rebuildInfo = try await workspace.tableRebuildInfo(of: table)
+            } catch {
+                rebuildInfoError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Why columns cannot be reordered, for the disabled Move items and refused drags. Nil when they can.
+    var reorderBlocker: String? {
+        guard reordersByRebuild else { return nil }
+        if let rebuildInfo { return rebuildInfo.blockerSentence }
+        if let rebuildInfoError { return "PostgreSQL cannot reorder columns of an existing table: checking its dependencies failed (\(rebuildInfoError))." }
+        return "PostgreSQL cannot reorder columns of an existing table until its dependencies have been checked."
+    }
+
     private func installEditor(draft: StructureDraft, generator: TableDDLGenerator) {
         let editor = StructureDraftEditor(draft: draft, generator: generator)
+        editor.reorderBlocker = { [weak self] in self?.reorderBlocker }
         editor.tableNames = workspace.tableNamesForReferences
         editor.isEditable = canEdit() && !isSaving
         editor.onChange = { [weak self] in
@@ -377,6 +407,12 @@ final class StructureViewController: NSViewController {
 
     var undoManagerForEdits: UndoManager? { editor?.editUndoManager }
 
+    /// The rebuild warning while saving would rebuild the table, for Preview SQL.
+    var previewWarning: String? {
+        guard let editor, let generator = workspace.structureGenerator, generator.needsRebuild(editor.draft) else { return nil }
+        return TableDDLGenerator.rebuildWarning
+    }
+
     /// The statements Save would run, for Preview SQL. Nil without pending changes.
     func previewOfPendingChanges() -> String? {
         guard let editor, let generator = workspace.structureGenerator else { return nil }
@@ -384,7 +420,10 @@ final class StructureViewController: NSViewController {
         commitCommentField()
         guard editor.draft.hasChanges else { return nil }
         do {
-            return TableDDLGenerator.script(try generator.alterStatements(editor.draft))
+            let script = TableDDLGenerator.script(try generator.alterStatements(editor.draft, rebuild: rebuildInfo))
+            guard generator.needsRebuild(editor.draft) else { return script }
+            let warning = TableDDLGenerator.rebuildWarningLines.map { "-- " + $0 }
+            return (["-- WARNING: this script rebuilds the table."] + warning + ["", script]).joined(separator: "\n")
         } catch {
             let problems = (error as? StructureChangeError)?.problems ?? [error.localizedDescription]
             return "-- Error generating SQL:\n" + problems.map { "-- " + $0 }.joined(separator: "\n")
@@ -413,9 +452,27 @@ final class StructureViewController: NSViewController {
             Alerts.showError(DatabaseError.unsupported(blocker), title: "Changes were not saved", in: view.window)
             return
         }
+        guard generator.needsRebuild(draft) else { return confirmSave(draft, generator: generator) }
+        // A rebuild has to put back everything the table carries now, so its catalog is read again first.
+        setSaving(true)
+        Task {
+            do {
+                rebuildInfo = try await workspace.tableRebuildInfo(of: table)
+                rebuildInfoError = nil
+            } catch {
+                setSaving(false)
+                Alerts.showError(error, title: "Changes were not saved", in: view.window)
+                return
+            }
+            setSaving(false)
+            confirmSave(draft, generator: generator)
+        }
+    }
+
+    private func confirmSave(_ draft: StructureDraft, generator: TableDDLGenerator) {
         let statements: [String]
         do {
-            statements = try generator.alterStatements(draft)
+            statements = try generator.alterStatements(draft, rebuild: rebuildInfo)
         } catch {
             SchemaScriptPrompt.showProblems((error as? StructureChangeError)?.problems ?? [error.localizedDescription], in: view.window)
             return
@@ -431,6 +488,7 @@ final class StructureViewController: NSViewController {
             statements: statements,
             workspace: workspace,
             confirmTitle: "Apply",
+            warning: generator.needsRebuild(draft) ? TableDDLGenerator.rebuildWarning : nil,
             in: view.window
         ) { [weak self] confirmed in
             if confirmed { self?.run(statements, transactional: generator.runsInTransaction) }

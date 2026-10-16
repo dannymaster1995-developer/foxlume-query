@@ -235,6 +235,10 @@ public struct StructureDraft: Hashable, Sendable {
     public let primaryIndex: IndexInfo?
     /// True for Create Table, where every row is new.
     public let isNewTable: Bool
+    /// Ids of existing columns a save has to move to reach the order of `columns`; see `movedColumnIDs(_:)`.
+    public private(set) var movedColumns: Set<Int> = []
+    /// Ids of columns the user moved, which `movedColumnIDs(_:)` prefers to mark as moved over the ones they passed.
+    private var draggedColumns: Set<Int> = []
     private var nextID: Int
 
     /// The draft for an existing table.
@@ -299,6 +303,30 @@ public struct StructureDraft: Hashable, Sendable {
         Self.normalizedComment(comment) != originalComment
     }
 
+    /// Whether existing columns change places. New columns placed among existing ones do not count.
+    public var columnOrderChanged: Bool { !movedColumns.isEmpty }
+
+    /// Whether the row is an existing column that changes place, which makes it a changed row.
+    public func isColumnMoved(row: Int) -> Bool {
+        guard let item = columns[draftRow: row], !item.isDeleted, item.original != nil else { return false }
+        return movedColumns.contains(item.id)
+    }
+
+    /// New columns followed by an existing column, in table order: they are added somewhere other than the end.
+    public var newColumnsAmongExisting: [ColumnDefinition] {
+        var result: [ColumnDefinition] = []
+        var pending: [ColumnDefinition] = []
+        for row in columns where !row.isDeleted && !row.current.isBlank {
+            if row.isNew {
+                pending.append(row.current)
+            } else {
+                result += pending
+                pending = []
+            }
+        }
+        return result
+    }
+
     /// Columns that will exist after saving, in table order.
     public var resultingColumns: [ColumnDefinition] {
         columns.filter { !$0.isDeleted }.map(\.current)
@@ -359,6 +387,7 @@ public struct StructureDraft: Hashable, Sendable {
         switch section {
         case .columns:
             guard let item = columns[draftRow: row] else { return .unchanged }
+            if !item.isDeleted, item.original != nil, movedColumns.contains(item.id) { return .modified }
             return Self.state(item, matches: { $0 == $1 })
         case .indexes:
             guard let item = indexes[draftRow: row] else { return .unchanged }
@@ -401,6 +430,22 @@ public struct StructureDraft: Hashable, Sendable {
         return columns.count - 1
     }
 
+    /// Moves column rows to `destination`, an index of the list before the move (0 = top, `columns.count` = bottom),
+    /// keeping their order, as a table view drop does. Returns where they ended up.
+    @discardableResult
+    public mutating func moveColumns(_ rows: IndexSet, to destination: Int) -> Range<Int> {
+        let valid = rows.filteredIndexSet { columns.indices.contains($0) }
+        guard !valid.isEmpty, (0...columns.count).contains(destination) else { return 0..<0 }
+        let moving = valid.map { columns[$0] }
+        var remaining = columns.indices.filter { !valid.contains($0) }.map { columns[$0] }
+        let start = destination - valid.count(in: 0..<destination)
+        remaining.insert(contentsOf: moving, at: start)
+        columns = remaining
+        draggedColumns.formUnion(moving.map(\.id))
+        updateMovedColumns()
+        return start..<(start + moving.count)
+    }
+
     @discardableResult
     public mutating func addIndex(_ index: IndexDefinition) -> Int {
         indexes.append(StructureRow(id: takeID(), original: nil, current: index))
@@ -441,6 +486,7 @@ public struct StructureDraft: Hashable, Sendable {
         if updated.name != before.name, !before.name.isEmpty {
             renameColumnReferences(from: before.name, to: updated.name)
         }
+        updateMovedColumns()
     }
 
     public mutating func updateIndex(at index: Int, _ change: (inout IndexDefinition) -> Void) {
@@ -456,24 +502,47 @@ public struct StructureDraft: Hashable, Sendable {
     /// Deletes rows, or restores them when every existing one among them is already marked deleted.
     public mutating func toggleDeletion(_ section: StructureSection, rows: IndexSet) {
         switch section {
-        case .columns: Self.toggleDeletion(&columns, rows: rows)
+        case .columns:
+            Self.toggleDeletion(&columns, rows: rows)
+            updateMovedColumns()
         case .indexes: Self.toggleDeletion(&indexes, rows: rows)
         case .foreignKeys: Self.toggleDeletion(&foreignKeys, rows: rows)
         }
     }
 
-    /// Restores one row to what the server has; a new row is removed.
+    /// Restores one row to what the server has; a new row is removed. A moved column also goes back to its place.
     public mutating func revert(_ section: StructureSection, row: Int) {
         switch section {
         case .columns:
             guard let item = columns[draftRow: row] else { return }
             let currentName = item.current.name
+            let wasMoved = isColumnMoved(row: row)
             Self.revert(&columns, row: row)
             if let originalName = item.original?.name, originalName != currentName, !item.isDeleted {
                 renameColumnReferences(from: currentName, to: originalName)
             }
+            draggedColumns.remove(item.id)
+            if wasMoved {
+                // Back after the nearest existing column that comes before it on the server, else to the top.
+                let restored = columns.remove(at: row)
+                let before = columns.lastIndex { !$0.isNew && $0.id < restored.id }
+                columns.insert(restored, at: before.map { $0 + 1 } ?? 0)
+            }
+            updateMovedColumns()
         case .indexes: Self.revert(&indexes, row: row)
         case .foreignKeys: Self.revert(&foreignKeys, row: row)
+        }
+    }
+
+    /// Restores several rows. Columns are found by id, since a moved column going back shifts the others.
+    public mutating func revert(_ section: StructureSection, rows: IndexSet) {
+        guard section == .columns else {
+            for row in rows.sorted(by: >) { revert(section, row: row) }
+            return
+        }
+        let ids = rows.compactMap { columns[draftRow: $0]?.id }
+        for id in ids {
+            if let index = columns.firstIndex(where: { $0.id == id }) { revert(.columns, row: index) }
         }
     }
 
@@ -510,6 +579,47 @@ public struct StructureDraft: Hashable, Sendable {
                 foreignKeys[index].current.referencedColumns = foreignKeys[index].current.referencedColumns.map { $0 == oldName ? newName : $0 }
             }
         }
+    }
+
+    private mutating func updateMovedColumns() {
+        movedColumns = Self.movedColumnIDs(columns, dragged: draggedColumns)
+    }
+
+    /// The fewest existing columns to move so the rest keep their server order: every column outside the heaviest
+    /// subsequence still in server order (row ids follow the server order). A column changed anyway weighs far less,
+    /// since its own MODIFY can move it at no cost; then a column the user dragged weighs a little less than one it
+    /// passed, so the dragged one is marked as moved. Remaining ties keep the columns that come first on the server.
+    static func movedColumnIDs(_ columns: [StructureRow<ColumnDefinition>], dragged: Set<Int> = []) -> Set<Int> {
+        let rows = columns.filter { !$0.isDeleted && $0.original != nil }
+        guard rows.count > 1 else { return [] }
+        let weights = rows.map { row -> Int in
+            guard let original = row.original else { return 0 }
+            var current = row.current
+            current.isPrimaryKey = original.isPrimaryKey
+            return (current == original ? 1_000_000 : 0) + (dragged.contains(row.id) ? 1 : 2)
+        }
+        // best[i]: weight of the heaviest increasing run that starts at row i.
+        var best = Array(repeating: 0, count: rows.count)
+        for index in rows.indices.reversed() {
+            var tail = 0
+            for next in (index + 1)..<rows.count where rows[next].id > rows[index].id {
+                tail = max(tail, best[next])
+            }
+            best[index] = weights[index] + tail
+        }
+        var kept = Set<Int>()
+        var remaining = best.max() ?? 0
+        var lastID = Int.min
+        var start = 0
+        while remaining > 0 {
+            let candidates = (start..<rows.count).filter { rows[$0].id > lastID && best[$0] == remaining }
+            guard let pick = candidates.min(by: { rows[$0].id < rows[$1].id }) else { break }
+            kept.insert(rows[pick].id)
+            remaining -= weights[pick]
+            lastID = rows[pick].id
+            start = pick + 1
+        }
+        return Set(rows.map(\.id)).subtracting(kept)
     }
 
     private mutating func takeID() -> Int {

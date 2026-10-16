@@ -100,6 +100,10 @@ extension ConnectionWorkspace {
         try await tracked { try await session.run { try $0.checkConstraints(of: table) } }
     }
 
+    func tableRebuildInfo(of table: TableRef) async throws -> TableRebuildInfo {
+        try await tracked { try await session.run { try $0.tableRebuildInfo(of: table) } }
+    }
+
     /// Runs the object's DROP right away (the caller has asked and passed Safe Mode); the catalog then reloads.
     func drop(_ object: SchemaObject) async throws {
         guard !isReadOnly else { throw DatabaseError.unsupported("This connection is read-only.") }

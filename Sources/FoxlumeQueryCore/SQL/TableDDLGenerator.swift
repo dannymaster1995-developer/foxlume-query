@@ -23,6 +23,10 @@ public enum StructureChangeError: Error, LocalizedError, Equatable {
 /// add columns, add the primary key, add indexes, add foreign keys, then comments. A changed index or foreign key is
 /// dropped and added again. Dropping the key before columns keeps a dropped key column from taking the constraint
 /// with it before the constraint is dropped by name.
+///
+/// Column order: MySQL moves columns with FIRST / AFTER on their MODIFY, CHANGE or ADD clause, and every column clause
+/// then goes into one ALTER TABLE. PostgreSQL cannot move columns, so the table is rebuilt first (TableRebuild.swift)
+/// and the other changes follow.
 public struct TableDDLGenerator: Sendable {
     public let dialect: SQLDialect
 
@@ -91,7 +95,8 @@ public struct TableDDLGenerator: Sendable {
 
     /// Everything that keeps the draft from being saved, as sentences for the user. Only rows the save adds or
     /// changes are checked, so a problem the server already lives with does not block unrelated edits.
-    public func problems(_ draft: StructureDraft) -> [String] {
+    /// `rebuild` is what a PostgreSQL reorder needs; without it a reorder is a problem.
+    public func problems(_ draft: StructureDraft, rebuild: TableRebuildInfo? = nil) -> [String] {
         var problems: [String] = []
         if draft.isNewTable {
             if draft.table.name.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -162,6 +167,7 @@ public struct TableDDLGenerator: Sendable {
             }
         }
         problems += duplicates(draft.foreignKeys.filter { !$0.isDeleted }.map(\.current.name), noun: "foreign keys")
+        problems += rebuildProblems(draft, rebuild: rebuild)
         return problems
     }
 
@@ -191,10 +197,15 @@ public struct TableDDLGenerator: Sendable {
     // MARK: - ALTER TABLE
 
     /// The script that turns the server's structure into the draft. Throws `StructureChangeError.incomplete` first.
-    public func alterStatements(_ draft: StructureDraft) throws -> [String] {
-        let problems = problems(draft)
+    /// A PostgreSQL draft with reordered columns needs `rebuild`; its script starts with the table rebuild.
+    public func alterStatements(_ draft: StructureDraft, rebuild: TableRebuildInfo? = nil) throws -> [String] {
+        let problems = problems(draft, rebuild: rebuild)
         guard problems.isEmpty else { throw StructureChangeError.incomplete(problems) }
-        return isMySQL ? mysqlAlter(draft) : postgresAlter(draft)
+        if isMySQL { return mysqlAlter(draft) }
+        if needsRebuild(draft), let rebuild {
+            return rebuildStatements(draft, rebuild: rebuild) + postgresAlter(draft)
+        }
+        return postgresAlter(draft)
     }
 
     private struct SectionPlan<Item> {
@@ -386,28 +397,41 @@ public struct TableDDLGenerator: Sendable {
             guard let original = row.original else { continue }
             columnClauses.append("DROP COLUMN \(q(original.name))")
         }
-        for (index, row) in draft.columns.enumerated() where draft.state(.columns, row: index) == .modified {
+        // Existing columns in their new order. A moved one goes right after the existing column before it, which is
+        // already in place: MySQL applies the clauses of one statement in turn, under the names they give.
+        var previousExisting: String?
+        for (index, row) in draft.columns.enumerated() where !row.isDeleted {
             guard let original = row.original else { continue }
+            defer { previousExisting = row.current.name }
+            let position = draft.isColumnMoved(row: index) ? " " + positionClause(after: previousExisting) : ""
             // Ticking Primary Key alone changes the key, not the column.
             var unkeyed = row.current
             unkeyed.isPrimaryKey = original.isPrimaryKey
-            guard unkeyed != original else { continue }
+            guard unkeyed != original || !position.isEmpty else { continue }
             if original.name != row.current.name {
-                columnClauses.append("CHANGE COLUMN \(q(original.name)) \(mysqlColumnDefinition(row.current))")
+                columnClauses.append("CHANGE COLUMN \(q(original.name)) \(mysqlColumnDefinition(row.current))\(position)")
             } else {
-                columnClauses.append("MODIFY COLUMN \(mysqlColumnDefinition(row.current))")
+                columnClauses.append("MODIFY COLUMN \(mysqlColumnDefinition(row.current))\(position)")
             }
         }
-        for row in draft.columns where row.isNew && !row.isDeleted && !row.current.isBlank {
-            columnClauses.append("ADD COLUMN \(mysqlColumnDefinition(row.current))")
+        // New columns follow in table order; one with an existing column after it goes in place.
+        let placedAmongExisting = Set(draft.newColumnsAmongExisting.map(\.name))
+        var previous: String?
+        for row in draft.columns where !row.isDeleted && !row.current.isBlank {
+            defer { previous = row.current.name }
+            guard row.isNew else { continue }
+            let position = placedAmongExisting.contains(row.current.name) ? " " + positionClause(after: previous) : ""
+            columnClauses.append("ADD COLUMN \(mysqlColumnDefinition(row.current))\(position)")
         }
-        if draft.primaryKeyChanged {
+        let movesColumns = draft.columnOrderChanged || !placedAmongExisting.isEmpty
+        if draft.primaryKeyChanged || movesColumns {
             // An AUTO_INCREMENT column must be a key at every step, so a key change travels with the column
-            // changes in one statement, which MySQL checks as a whole.
+            // changes in one statement, which MySQL checks as a whole. Moves do too: MySQL rebuilds the table
+            // for each statement that moves a column, so one statement rebuilds it once.
             var clauses: [String] = []
-            if !draft.originalPrimaryKey.isEmpty { clauses.append("DROP PRIMARY KEY") }
+            if draft.primaryKeyChanged, !draft.originalPrimaryKey.isEmpty { clauses.append("DROP PRIMARY KEY") }
             clauses += columnClauses
-            if !draft.primaryKey.isEmpty { clauses.append("ADD PRIMARY KEY (\(columnList(draft.primaryKey)))") }
+            if draft.primaryKeyChanged, !draft.primaryKey.isEmpty { clauses.append("ADD PRIMARY KEY (\(columnList(draft.primaryKey)))") }
             statements.append(clauses.count == 1 ? "\(alter) \(clauses[0])" : "\(alter)\n    " + clauses.joined(separator: ",\n    "))
         } else {
             statements += columnClauses.map { "\(alter) \($0)" }
@@ -423,6 +447,11 @@ public struct TableDDLGenerator: Sendable {
             statements.append("\(alter) COMMENT = \(dialect.quoteString(draft.comment ?? ""))")
         }
         return statements
+    }
+
+    /// `FIRST`, or `AFTER` the named column.
+    private func positionClause(after column: String?) -> String {
+        column.map { "AFTER \(q($0))" } ?? "FIRST"
     }
 
     /// The whole column definition, which MODIFY / CHANGE COLUMN and ADD COLUMN need restated in full.

@@ -110,6 +110,9 @@ public protocol DatabaseConnection: AnyObject {
     func triggers(of table: TableRef) throws -> [TriggerInfo]
     /// CHECK constraints of one table, for the Structure view. Empty where the server ignores CHECK.
     func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo]
+    /// What rebuilding a table with its columns in another order needs, and what blocks it (PostgreSQL only).
+    /// See TableRebuild.swift.
+    func tableRebuildInfo(of table: TableRef) throws -> TableRebuildInfo
     /// Columns, primary and unique keys and foreign keys of every table and view in a schema (MySQL: a database) in a
     /// few catalog queries, for the ER diagram. Columns carry name, type, nullability and primary key only. Nil when
     /// the engine has no bulk reader; the caller then reads `structure(of:)` table by table. See DiagramMetadata.swift.
@@ -257,6 +260,10 @@ public extension DatabaseConnection {
     func triggers(of table: TableRef) throws -> [TriggerInfo] { [] }
 
     func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo] { [] }
+
+    func tableRebuildInfo(of table: TableRef) throws -> TableRebuildInfo {
+        throw DatabaseError.unsupported("\(kind.displayName) does not rebuild tables to reorder columns.")
+    }
 
     func diagramStructures(schema: String?) throws -> [TableStructure]? { nil }
 

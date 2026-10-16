@@ -15,6 +15,8 @@ final class StructureDraftEditor: NSView {
         didSet { if section == .foreignKeys { configureSection() } }
     }
     var onChange: (() -> Void)?
+    /// Why columns cannot be reordered now, such as a PostgreSQL table that cannot be rebuilt; nil when they can.
+    var reorderBlocker: () -> String? = { nil }
 
     var section: StructureSection = .columns {
         didSet { if oldValue != section { configureSection() } }
@@ -41,6 +43,13 @@ final class StructureDraftEditor: NSView {
         table.onEdit = { [weak self] row, key, value in self?.setValue(value, row: row, key: key) }
         table.onDeleteRows = { [weak self] rows in self?.toggleDeletion(rows) }
         table.menuItems = { [weak self] rows in self?.menuItems(for: rows) ?? [] }
+        table.canMoveRows = { [weak self] in self?.canMoveColumns ?? false }
+        table.onMoveRows = { [weak self] rows, destination in self?.moveColumns(rows, to: destination) }
+        table.onMoveKey = { [weak self] offset in
+            guard let self, self.section == .columns, self.isEditable else { return false }
+            self.moveSelectedColumns(offset < 0 ? .up : .down)
+            return true
+        }
         addSubviewFilling(table)
         configureSection()
     }
@@ -166,9 +175,7 @@ final class StructureDraftEditor: NSView {
     func revert(_ rows: IndexSet) {
         guard isEditable else { return NSSound.beep() }
         var updated = draft
-        for index in rows.compactMap(draftRow).sorted(by: >) {
-            updated.revert(section, row: index)
-        }
+        updated.revert(section, rows: IndexSet(rows.compactMap(draftRow)))
         apply(updated, action: "Revert Changes")
     }
 
@@ -189,7 +196,88 @@ final class StructureDraftEditor: NSView {
         if indexes.contains(where: { draft.state(section, row: $0) == .modified }) {
             items.append(item("Revert Changes", #selector(menuRevert(_:))))
         }
+        if section == .columns {
+            items.append(.separator())
+            items += moveItems(for: IndexSet(indexes))
+        }
         return items
+    }
+
+    // MARK: Column order
+
+    enum ColumnMove {
+        case up, down, top, bottom
+
+        var title: String {
+            switch self {
+            case .up: return "Move Up"
+            case .down: return "Move Down"
+            case .top: return "Move to Top"
+            case .bottom: return "Move to Bottom"
+            }
+        }
+    }
+
+    /// Columns can be dragged or moved: the Columns section, editable, and nothing blocks a reorder.
+    var canMoveColumns: Bool {
+        section == .columns && isEditable && reorderBlocker() == nil
+    }
+
+    /// Where `move` drops the rows, or nil when it would not change anything.
+    private func destination(of move: ColumnMove, rows: IndexSet) -> Int? {
+        guard let first = rows.first, let last = rows.last else { return nil }
+        let count = draft.rowCount(.columns)
+        let contiguous = last - first + 1 == rows.count
+        switch move {
+        case .up: return first > 0 ? first - 1 : (contiguous ? nil : 0)
+        case .down: return last < count - 1 ? last + 2 : (contiguous ? nil : count)
+        case .top: return contiguous && first == 0 ? nil : 0
+        case .bottom: return contiguous && last == count - 1 ? nil : count
+        }
+    }
+
+    func moveSelectedColumns(_ move: ColumnMove) {
+        let rows = table.selectedRows
+        guard canMoveColumns, let destination = destination(of: move, rows: rows) else { return NSSound.beep() }
+        moveColumns(rows, to: destination)
+    }
+
+    /// Moves column rows to `destination` (an index before the move), keeps them selected, as one undo step.
+    func moveColumns(_ rows: IndexSet, to destination: Int) {
+        guard canMoveColumns else { return NSSound.beep() }
+        table.commitEditing()
+        var updated = draft
+        let placed = updated.moveColumns(rows, to: destination)
+        guard updated != draft else { return }
+        apply(updated, action: rows.count > 1 ? "Move Columns" : "Move Column")
+        table.select(rows: IndexSet(integersIn: placed))
+    }
+
+    private func moveItems(for rows: IndexSet) -> [NSMenuItem] {
+        let blocker = reorderBlocker()
+        return [ColumnMove.up, .down, .top, .bottom].map { move in
+            let item = NSMenuItem(title: move.title, action: #selector(menuMove(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = move
+            switch move {
+            case .up:
+                item.keyEquivalent = String(UnicodeScalar(NSUpArrowFunctionKey)!)
+                item.keyEquivalentModifierMask = [.command, .option]
+            case .down:
+                item.keyEquivalent = String(UnicodeScalar(NSDownArrowFunctionKey)!)
+                item.keyEquivalentModifierMask = [.command, .option]
+            case .top, .bottom:
+                break
+            }
+            item.isEnabled = blocker == nil && destination(of: move, rows: rows) != nil
+            item.toolTip = blocker
+            return item
+        }
+    }
+
+    @objc private func menuMove(_ sender: NSMenuItem) {
+        guard let move = sender.representedObject as? ColumnMove else { return }
+        moveSelectedColumns(move)
     }
 
     @objc private func menuAdd(_ sender: Any?) { addRow() }
@@ -331,6 +419,7 @@ final class StructureDraftEditor: NSView {
             guard let original = draft.columns[index].original else { return false }
             let current = draft.columns[index].current
             switch key {
+            case "#": return draft.isColumnMoved(row: index)
             case "name": return current.name != original.name
             case "type": return current.dataType != original.dataType
             case "nullable": return current.isNullable != original.isNullable

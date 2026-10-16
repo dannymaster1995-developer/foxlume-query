@@ -370,12 +370,14 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         var parts: [String] = []
         let plan = workspace.pendingTableOperationPlan
         if !plan.isEmpty { parts.append(statementsText(plan.all)) }
+        var warning: String?
         if let table = tabs.selectedTab?.content as? TableTabViewController, let preview = table.previewOfPendingChanges() {
             parts.append(preview)
+            warning = table.previewWarning
         }
         let comment = workspace.kind.isSQL ? "--" : "//"
         let text = parts.isEmpty ? "\(comment) No pending changes" : parts.joined(separator: "\n\n")
-        SQLPreviewSheet(text: text, language: workspace.queryLanguage).begin(for: window)
+        SQLPreviewSheet(text: text, language: workspace.queryLanguage, warning: warning).begin(for: window)
     }
 
     private func statementsText(_ statements: [String]) -> String {

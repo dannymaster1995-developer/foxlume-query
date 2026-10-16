@@ -62,7 +62,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 <img src="docs/images/er-diagram-dark.png" alt="Entity-relationship diagram of the Chinook sample database" width="820">
 
 - **ER diagrams** of a whole schema, with crow's-foot relationships, drag-to-arrange layouts that are remembered, and PNG or PDF export.
-- **A structure editor** for PostgreSQL and MySQL: add or change columns, indexes, foreign keys and comments, review the generated `ALTER` statements, then save. **New Table** builds a `CREATE TABLE` with a live preview.
+- **A structure editor** for PostgreSQL and MySQL: add or change columns, indexes, foreign keys and comments, drag columns into a new order, review the generated `ALTER` statements, then save. MySQL moves columns in place; PostgreSQL rebuilds the table in one transaction when nothing depends on it. **New Table** builds a `CREATE TABLE` with a live preview.
 - **Functions, procedures, triggers and types** in the sidebar, with their source and "Edit in Query Tab".
 - **Views** for PostgreSQL, MySQL, MariaDB, SQLite and DuckDB: **New View** opens a `CREATE VIEW` template, **Edit View** opens the current definition ready to replace, and **Save View** runs it and selects the view in the sidebar. PostgreSQL materialized views can be edited and refreshed too.
 
@@ -183,7 +183,7 @@ The most used ones:
 | ⌥⌘I | Row Inspector |
 | ⌃⌘J | Jump to column |
 | ⌘[ / ⌘] | Previous / next page |
-| ⌥⌘↑ / ⌥⌘↓ | First / last page |
+| ⌥⌘↑ / ⌥⌘↓ | First / last page; in the structure editor's column list, move the selected columns up / down |
 | ⌘R / ⇧⌘R | Reload data / reload table list |
 | ⌘K | Switch database |
 | ⌥⌘1 / ⌥⌘2 | Data / Structure |

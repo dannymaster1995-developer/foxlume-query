@@ -58,6 +58,12 @@ final class StructureEditorTable: NSView {
     var onDeleteRows: ((IndexSet) -> Void)?
     var onSelectionChange: (() -> Void)?
     var menuItems: ((IndexSet) -> [NSMenuItem])?
+    /// Whether rows can be dragged to another place now; the owner moves them in `onMoveRows`.
+    var canMoveRows: () -> Bool = { false }
+    /// Rows dropped at `destination`, an index of the list before the move.
+    var onMoveRows: ((_ rows: IndexSet, _ destination: Int) -> Void)?
+    /// ⌥⌘↑ (-1) or ⌥⌘↓ (+1) on the focused table. Returns false when the owner did not handle it.
+    var onMoveKey: ((_ offset: Int) -> Bool)?
     /// Create Table shows every row as new, so it turns the change colors off.
     var showsChangeColors = true
 
@@ -87,6 +93,11 @@ final class StructureEditorTable: NSView {
         tableView.backgroundColor = Theme.gridBackground
         tableView.menu = NSMenu()
         tableView.menu?.delegate = self
+        // Items are enabled by the owner, which also explains a disabled one in its tooltip.
+        tableView.menu?.autoenablesItems = false
+        tableView.registerForDraggedTypes([Self.rowType])
+        tableView.draggingDestinationFeedbackStyle = .gap
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
         tableView.setAccessibilityIdentifier("structureEditor")
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -126,6 +137,24 @@ final class StructureEditorTable: NSView {
     }
 
     var selectedRows: IndexSet { contextRows ?? tableView.selectedRowIndexes }
+
+    private static let rowType = NSPasteboard.PasteboardType("com.foxlume.query.structure-row")
+    /// The rows being dragged, set when a drag starts in this table.
+    private var draggedRows: IndexSet?
+
+    func select(rows: IndexSet) {
+        let valid = rows.filteredIndexSet { $0 >= 0 && $0 < tableView.numberOfRows }
+        tableView.selectRowIndexes(valid, byExtendingSelection: false)
+        if let first = valid.first { tableView.scrollRowToVisible(first) }
+    }
+
+    /// Moves rows as a drop at `destination` does. False when moving is not allowed now.
+    @discardableResult
+    func moveRows(_ rows: IndexSet, to destination: Int) -> Bool {
+        guard isEditable, canMoveRows(), !rows.isEmpty, (0...tableView.numberOfRows).contains(destination) else { return false }
+        onMoveRows?(rows, destination)
+        return true
+    }
 
     func select(row: Int) {
         guard row >= 0, row < tableView.numberOfRows else { return }
@@ -192,6 +221,35 @@ extension StructureEditorTable: NSTableViewDataSource, NSTableViewDelegate {
         onSelectionChange?()
     }
 
+    // MARK: Dragging rows
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        guard isEditable, canMoveRows() else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(String(row), forType: Self.rowType)
+        return item
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+        draggedRows = rowIndexes
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        draggedRows = nil
+    }
+
+    func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        guard (info.draggingSource as? NSTableView) === tableView, draggedRows != nil else { return [] }
+        if dropOperation == .on { tableView.setDropRow(row, dropOperation: .above) }
+        return .move
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        guard let rows = draggedRows else { return false }
+        draggedRows = nil
+        return moveRows(rows, to: row)
+    }
+
     private static func kindName(_ kind: StructureCellKind) -> String {
         switch kind {
         case .text: return "text"
@@ -221,9 +279,19 @@ extension StructureEditorTable: NSMenuDelegate {
     }
 }
 
-/// Delete and Forward Delete remove the selected rows; Return edits the first text cell.
+/// Delete and Forward Delete remove the selected rows; Return edits the first text cell; ⌥⌘↑ / ⌥⌘↓ move rows.
 final class StructureTableView: NSTableView {
     weak var owner: StructureEditorTable?
+
+    /// Handled before the main menu, whose First Page / Last Page share these keys but only apply to the Data view.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function])
+        if modifiers == [.command, .option], [125, 126].contains(event.keyCode), window?.firstResponder === self,
+           let owner, owner.onMoveKey?(event.keyCode == 126 ? -1 : 1) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
