@@ -34,7 +34,7 @@ Live suites run when a server answers on its port on 127.0.0.1, and skip otherwi
 | PostgreSQL with TLS | 55442 | `scripts/dbtest-tls.sh start` |
 | MySQL with TLS | 53316 | `scripts/dbtest-tls.sh start` |
 
-The credentials are local test values (see `scripts/dbtest.sh` and the `scripts/seed-*` files). Never point the tests at a real server. `scripts/tls-test-certs.sh` creates the test CA, server and client certificates; they are never committed.
+The credentials are local test values (see `scripts/dbtest.sh` and the `scripts/seed-*` files). Never point the tests at a real server. `scripts/dbtest.sh start` seeds a fresh data folder once from the `scripts/seed-*` files (`reset` deletes the data and starts again); on PostgreSQL and MySQL that includes `perf_big`, two million generated rows (`id`, `payload` = md5 of the id, `at`; no key or index) for the export paging, Explain and plan diagram tests, which adds about four seconds per server to a fresh start. `scripts/tls-test-certs.sh` creates the test CA, server and client certificates; they are never committed.
 
 `scripts/redis-extra.sh start` adds Redis Sentinel, Cluster and TLS servers for their suites. With every server running, use `fqtest --no-parallel`: in parallel, the live suites occupy all of Swift Testing's threads and the timing checks of the cancel and interrupt tests fail.
 

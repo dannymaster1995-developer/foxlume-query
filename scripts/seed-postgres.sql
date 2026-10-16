@@ -79,3 +79,14 @@ INSERT INTO shop.products VALUES ('SKU-1', 'Iced latte', 2.50), ('SKU-2', 'Grill
 
 CREATE TABLE public.no_pk_log (message text, logged_at timestamptz DEFAULT now());
 INSERT INTO public.no_pk_log (message) VALUES ('first'), ('second');
+
+-- perf_big: two million rows for the export paging, Explain and plan diagram tests. No key and no index, so
+-- filters scan the whole table. payload is md5(id), the same on both servers: 476 payloads start with 'abc'.
+-- Generated on the server; when the table already holds every row, a re-run only counts them.
+CREATE TABLE IF NOT EXISTS public.perf_big (id integer, payload text, at timestamptz);
+DELETE FROM public.perf_big WHERE (SELECT count(*) FROM public.perf_big) <> 2000000;
+INSERT INTO public.perf_big (id, payload, at)
+SELECT g, md5(g::text), timestamptz '2026-01-01 00:00:00+00' - g * interval '1 second'
+FROM generate_series(1, 2000000) AS g
+WHERE NOT EXISTS (SELECT 1 FROM public.perf_big);
+VACUUM ANALYZE public.perf_big;

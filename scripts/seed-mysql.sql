@@ -71,3 +71,14 @@ GROUP BY u.email;
 
 CREATE TABLE no_pk_log (message text, logged_at timestamp DEFAULT CURRENT_TIMESTAMP);
 INSERT INTO no_pk_log (message) VALUES ('first'), ('second');
+
+-- perf_big: two million rows for the export paging, Explain and plan diagram tests. No key and no index, so
+-- filters scan the whole table. payload is MD5(id), the same on both servers: 476 payloads start with 'abc'.
+-- Generated on the server; when the table already holds every row, a re-run only counts them.
+CREATE TABLE IF NOT EXISTS perf_big (id bigint, payload varchar(32), at datetime) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+SET @perf_big_rows = (SELECT COUNT(*) FROM perf_big);
+DELETE FROM perf_big WHERE @perf_big_rows <> 2000000;
+SET SESSION cte_max_recursion_depth = 2000000;
+INSERT INTO perf_big (id, payload, at)
+WITH RECURSIVE seq(g) AS (SELECT 1 FROM DUAL WHERE @perf_big_rows <> 2000000 UNION ALL SELECT g + 1 FROM seq WHERE g < 2000000)
+SELECT g, MD5(g), TIMESTAMP '2026-01-01 00:00:00' - INTERVAL g SECOND FROM seq;
