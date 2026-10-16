@@ -138,6 +138,59 @@ extension AppCompletionTests {
             }
         }
 
+        /// Copy As holds IN List on grids of SQL engines and SQL UPDATE on their table tabs, disabled with the reason
+        /// until the table's primary key is known and usable.
+        @Test func copyAsMenuOffersInListAndUpdate() {
+            let grid = DataGridView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+            grid.setContent(DataGridContent(columns: [ResultColumn(name: "id", typeName: "int4", isNumeric: true), ResultColumn(name: "name", typeName: "text")], rows: [[.text("1"), .text("a")]]))
+            func copyAs() -> [NSMenuItem] {
+                let menu = cellMenu(grid, row: 0, column: 1)
+                defer { grid.menuDidClose(menu) }
+                return menu.items.first { $0.title == "Copy As" }?.submenu?.items ?? []
+            }
+            #expect(copyAs().map(\.title) == ["CSV", "JSON", "SQL INSERT", "Markdown"], "MongoDB, Redis and structure grids")
+            grid.allowsInListCopy = true
+            #expect(copyAs().map(\.title) == ["CSV", "JSON", "SQL INSERT", "IN List", "Markdown"], "query results")
+
+            grid.updateCopyTarget = (TableRef(name: "people"), nil)
+            #expect(copyAs().map(\.title) == ["CSV", "JSON", "SQL INSERT", "SQL UPDATE", "IN List", "Markdown"], "table tabs")
+            var update = copyAs().first { $0.title == "SQL UPDATE" }
+            #expect(update?.isEnabled == false && update?.toolTip?.contains("not known yet") == true)
+            #expect(grid.updateText() == nil)
+            grid.updateCopyTarget = (TableRef(name: "people"), [])
+            update = copyAs().first { $0.title == "SQL UPDATE" }
+            #expect(update?.isEnabled == false && update?.toolTip?.contains("no primary key") == true)
+            grid.updateCopyTarget = (TableRef(name: "people"), ["id"])
+            update = copyAs().first { $0.title == "SQL UPDATE" }
+            #expect(update?.isEnabled == true && update?.toolTip == nil)
+            #expect(copyAs().allSatisfy { $0.isEnabled })
+        }
+
+        @Test func inListTakesTheClickedColumnOrTheSelectedCells() {
+            let grid = DataGridView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+            grid.setContent(DataGridContent(
+                columns: [ResultColumn(name: "id", typeName: "int4", isNumeric: true), ResultColumn(name: "name", typeName: "text")],
+                rows: [[.text("1"), .text("a")], [.text("2"), .text("O'Brien")], [.text("3"), .text("a")], [.text("4"), .null]]
+            ))
+            grid.allowsInListCopy = true
+            grid.dialectForCopy = .postgresql
+            func inList(row: Int, column: Int) -> String? {
+                let menu = cellMenu(grid, row: row, column: column)
+                defer { grid.menuDidClose(menu) }
+                return grid.inListText()
+            }
+            grid.tableView.selectRowIndexes(IndexSet(0...3), byExtendingSelection: false)
+            #expect(inList(row: 1, column: 1) == "('a', 'O''Brien')", "the clicked column of the selected rows, once each, no NULL")
+            #expect(inList(row: 2, column: 0) == "(1, 2, 3, 4)")
+
+            grid.selectCells(rows: 1...3, columns: 0...0)
+            #expect(inList(row: 2, column: 0) == "(2, 3, 4)", "the selected cells of a one-column range")
+            grid.selectCells(rows: 0...1, columns: 0...1)
+            #expect(inList(row: 0, column: 1) == "('a', 'O''Brien')", "the clicked column of a wider range")
+            grid.dialectForCopy = .mysql
+            #expect(inList(row: 0, column: 0) == "(1, 2)")
+        }
+
         @Test func localSortCyclesThroughSeveralKeys() {
             let grid = DataGridView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
             let recorder = GridRecorder()
@@ -264,6 +317,28 @@ extension AppCompletionTests {
             try choose("Current Timestamp (NOW())", row: 1, column: 1)
             #expect(grid.content.changes.value(row: 1, column: 1) == .expression("CURRENT_TIMESTAMP"))
             #expect(tab.previewOfPendingChanges()?.contains("SET \"name\" = CURRENT_TIMESTAMP WHERE \"id\" = '2'") == true)
+        }
+
+        /// SQL UPDATE copies an edited row with its staged values, matched by the key it was loaded with, and runs.
+        @Test func copyAsUpdateCarriesTheEditsAndRuns() async throws {
+            let (tab, workspace, url) = try await makeTab()
+            defer { Task { await tearDown(workspace, url) } }
+            let grid = tab.grid
+            #expect(grid.updateCopyTarget?.table == TableRef(name: "fq_grid_items"))
+            #expect(grid.updateCopyTarget?.primaryKey == ["id"])
+            #expect(grid.allowsInListCopy)
+            tab.dataGrid(grid, didEditCells: [GridCellEdit(row: 1, column: 1, value: .text("it's")), GridCellEdit(row: 1, column: 2, value: .null)], actionName: "Edit")
+            grid.selectRow(1)
+            let menu = cellMenu(grid, row: 1, column: 1)
+            let update = try #require(menu.items.first { $0.title == "Copy As" }?.submenu?.items.first { $0.title == "SQL UPDATE" })
+            #expect(update.isEnabled)
+            let sql = try #require(grid.updateText())
+            grid.menuDidClose(menu)
+            #expect(sql.hasPrefix("UPDATE \"fq_grid_items\" SET \"name\" = 'it''s', \"qty\" = NULL WHERE \"id\" = "))
+            #expect(sql.components(separatedBy: "\n").filter { !$0.isEmpty }.count == 1)
+            _ = try await workspace.execute(sql, recordHistory: false)
+            let stored = try await workspace.execute("SELECT name, qty FROM fq_grid_items WHERE id = 2", recordHistory: false)[0].rows
+            #expect(stored == [[.text("it's"), .null]])
         }
 
         @Test func rangeEditsAreOneStepAndSortRunsOnTheServer() async throws {

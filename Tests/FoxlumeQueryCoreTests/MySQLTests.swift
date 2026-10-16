@@ -582,6 +582,13 @@ struct MySQLLiveTests {
         #expect(rows.allSatisfy { ["t", "1"].contains($0[2].displayString) })
     }
 
+    @Test func copiedUpdateAndInListRun() throws {
+        let connection = try MySQLTestServer.connect(ssl: .disable)
+        defer { connection.close() }
+        _ = try connection.execute("CREATE TEMPORARY TABLE copy_probe (a INT, b VARCHAR(20), note TEXT, flag BOOLEAN, score DECIMAL(6,2), PRIMARY KEY (a, b))", rowLimit: nil)
+        try SQLRowCopyTests.liveRoundTrip(connection, dialect: .mysql, trueText: "1")
+    }
+
     @Test func rowLimitIsAppliedByTheServerAndThenRestored() throws {
         let connection = try MySQLTestServer.connect(ssl: .disable)
         defer { connection.close() }

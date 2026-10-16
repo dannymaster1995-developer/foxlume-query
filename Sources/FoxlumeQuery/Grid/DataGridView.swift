@@ -159,6 +159,11 @@ final class DataGridView: NSView {
     /// Name used for `INSERT INTO` when copying rows as SQL.
     var tableNameForCopy = "table_name"
     var dialectForCopy: SQLDialect = .postgresql
+    /// Offer "Copy As ▸ IN List" (table tabs and query results of SQL engines).
+    var allowsInListCopy = false
+    /// The table "Copy As ▸ SQL UPDATE" writes to and its primary key (nil while the structure is unknown). Nil hides
+    /// the item (query results, MongoDB, Redis); a missing key keeps it, disabled with the reason.
+    var updateCopyTarget: (table: TableRef, primaryKey: [String]?)?
 
     private static let rowNumberIdentifier = NSUserInterfaceItemIdentifier("eq.rownumber")
     private var rowNumberColumn: NSTableColumn? {
@@ -480,6 +485,8 @@ final class DataGridView: NSView {
     @objc func copyAsJSON(_ sender: Any?) { copyRows(format: .json) }
     @objc private func copyAsSQL(_ sender: Any?) { copyRows(format: .sqlInsert) }
     @objc private func copyAsMarkdown(_ sender: Any?) { copyRows(format: .markdown) }
+    @objc private func copyAsInList(_ sender: Any?) { copyInList() }
+    @objc private func copyAsUpdate(_ sender: Any?) { copyUpdates() }
     @objc private func setNull(_ sender: Any?) { setSelectedCells(to: .null, actionName: "Set NULL") }
     @objc private func setEmpty(_ sender: Any?) { setSelectedCells(to: .text(""), actionName: "Set Empty String") }
     @objc private func setDefault(_ sender: Any?) { setSelectedCells(to: .expression("DEFAULT"), actionName: "Set DEFAULT") }
@@ -659,6 +666,18 @@ extension DataGridView: NSMenuDelegate {
         submenu.addItem(item("CSV", #selector(copyAsCSV(_:))))
         submenu.addItem(item("JSON", #selector(copyAsJSON(_:))))
         submenu.addItem(item("SQL INSERT", #selector(copyAsSQL(_:))))
+        if updateCopyTarget != nil {
+            let update = item("SQL UPDATE", #selector(copyAsUpdate(_:)))
+            if let reason = updateCopyUnavailableReason {
+                submenu.autoenablesItems = false
+                update.isEnabled = false
+                update.toolTip = reason
+            }
+            submenu.addItem(update)
+        }
+        if allowsInListCopy {
+            submenu.addItem(item("IN List", #selector(copyAsInList(_:))))
+        }
         submenu.addItem(item("Markdown", #selector(copyAsMarkdown(_:))))
         copyAs.submenu = submenu
         menu.addItem(copyAs)

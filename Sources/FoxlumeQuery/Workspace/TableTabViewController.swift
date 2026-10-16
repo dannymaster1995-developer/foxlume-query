@@ -148,6 +148,8 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
         grid.readOnlyReason = readOnlyReason
         grid.tableNameForCopy = table.name
         grid.dialectForCopy = workspace.dialect
+        grid.allowsInListCopy = workspace.kind.isSQL
+        grid.updateCopyTarget = workspace.kind.isSQL ? (table, nil) : nil
         grid.showsRowNumbers = AppEnvironment.settings.showRowNumbers
         grid.translatesAutoresizingMaskIntoConstraints = false
 
@@ -297,6 +299,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
     private func loadStructureThenData() {
         Task {
             structure = try? await workspace.structure(of: table)
+            if workspace.kind.isSQL { grid.updateCopyTarget = (table, structure?.primaryKey) }
             if let columns = structure?.columns.map(\.name), query.sort.isEmpty, let key = structure?.primaryKey.first, columns.contains(key) {
                 query.sort = [SortKey(column: key, ascending: true)]
                 grid.setSortIndicator(query.sort)

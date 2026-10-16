@@ -113,12 +113,10 @@ public enum ResultExporter {
     static func inserts(columns: [ResultColumn], rows: [[CellValue]], tableName: String, dialect: SQLDialect) -> String {
         let names = columns.map { dialect.quoteIdentifier($0.name) }.joined(separator: ", ")
         let table = dialect.quoteIdentifier(tableName)
+        let encodings = columns.map(ExportColumn.init)
         return rows.map { row in
             let values = row.enumerated().map { index, value -> String in
-                if case .text(let text) = value, index < columns.count, columns[index].isNumeric, isJSONNumber(text) {
-                    return text
-                }
-                return dialect.literal(value)
+                index < encodings.count ? ExportValueEncoding.sqlLiteral(value, column: encodings[index], dialect: dialect) : dialect.literal(value)
             }
             return "INSERT INTO \(table) (\(names)) VALUES (\(values.joined(separator: ", ")));"
         }.joined(separator: "\n") + (rows.isEmpty ? "" : "\n")

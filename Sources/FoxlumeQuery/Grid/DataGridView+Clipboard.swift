@@ -1,7 +1,7 @@
 import AppKit
 import FoxlumeQueryCore
 
-/// Copying a cell range, pasting a clipboard block and filling cells with one value. Pasted and filled values go to
+/// Copying a cell range or rows as an IN list or UPDATE statements, pasting a clipboard block and filling cells with one value. Pasted and filled values go to
 /// the delegate as staged edits, so they are saved, undone and previewed like typed ones.
 extension DataGridView {
     // MARK: Copy
@@ -31,6 +31,65 @@ extension DataGridView {
         }
         return ResultExporter.export(columns: columns.map { content.columns[$0] }, rows: values, format: .tsv, includeHeader: includeHeader)
             .trimmingCharacters(in: .newlines)
+    }
+
+    // MARK: Copy as IN list and UPDATE
+
+    /// "Copy As ▸ IN List": `(1, 2, 3)` from one column. Opened on the cell selection, it takes the selected cells of
+    /// the clicked column (of the only column, when the selection spans one); otherwise the clicked column of the rows.
+    func copyInList() {
+        guard let text = inListText() else { return NSSound.beep() }
+        setPasteboard(text)
+    }
+
+    func inListText() -> String? {
+        let column: Int
+        let rows: [Int]
+        if !cellSelection.isEmpty, contextRows == nil || contextCellIsSelected {
+            let selected = cellSelection.affectedColumns
+            let clicked = contextCell.flatMap { displayPosition(ofTableColumn: $0.tableColumn) }
+            guard let position = selected.count == 1 ? selected.first : (clicked ?? cellSelection.active?.column),
+                  let dataColumn = dataColumn(atDisplayPosition: position) else { return nil }
+            column = dataColumn
+            rows = cellSelection.affectedRows.filter { cellSelection.columns(inRow: $0).contains(position) }
+        } else {
+            guard let cell = targetCell, let dataColumn = dataColumnIndex(atTableColumn: cell.tableColumn) else { return nil }
+            column = dataColumn
+            rows = Array(targetRows())
+        }
+        let values = rows.filter { $0 < content.displayRowCount }.compactMap { content.currentValue(row: $0, column: column) }
+        return SQLRowCopy.inList(values, column: content.columns[column], dialect: dialectForCopy)
+    }
+
+    /// Why SQL UPDATE is disabled in the cell menu, or nil when it can be used.
+    var updateCopyUnavailableReason: String? {
+        guard let target = updateCopyTarget else { return "Only rows of a table can be copied as UPDATE statements." }
+        guard let primaryKey = target.primaryKey else { return "The primary key of “\(target.table.name)” is not known yet." }
+        return SQLRowCopy.updateUnavailableReason(columns: content.columns.map(\.name), primaryKey: primaryKey)
+    }
+
+    /// "Copy As ▸ SQL UPDATE": one statement per selected row that is already in the table, with the values the row
+    /// shows now, so a copied edited row applies the edits.
+    func copyUpdates() {
+        guard let text = updateText() else { return NSSound.beep() }
+        setPasteboard(text)
+    }
+
+    func updateText() -> String? {
+        guard updateCopyUnavailableReason == nil, let target = updateCopyTarget, let primaryKey = target.primaryKey else { return nil }
+        let rows = targetRows().filter { $0 < content.rows.count }.map { row in
+            SQLRowCopy.UpdateRow(
+                current: (0..<content.columns.count).map { content.currentValue(row: row, column: $0) ?? .null },
+                original: content.rows[row]
+            )
+        }
+        guard !rows.isEmpty else { return nil }
+        return SQLRowCopy.updates(table: target.table, columns: content.columns, primaryKey: primaryKey, rows: rows, dialect: dialectForCopy)
+    }
+
+    private func setPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     // MARK: Paste

@@ -102,6 +102,7 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         grid.isEditable = false
         grid.readOnlyReason = "Query results are read-only. Open the table to edit its rows."
         grid.dialectForCopy = workspace.dialect
+        grid.allowsInListCopy = workspace.kind.isSQL
         grid.showsRowNumbers = AppEnvironment.settings.showRowNumbers
 
         messageView.isEditable = false

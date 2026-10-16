@@ -240,6 +240,13 @@ struct PostgresLiveTests {
         #expect(rows.allSatisfy { ["t", "1"].contains($0[2].displayString) })
     }
 
+    @Test func copiedUpdateAndInListRun() throws {
+        let connection = try PostgresTestServer.connect()
+        defer { connection.close() }
+        _ = try connection.execute("CREATE TEMP TABLE copy_probe (a INT, b VARCHAR(20), note TEXT, flag BOOLEAN, score NUMERIC(6,2), PRIMARY KEY (a, b))", rowLimit: nil)
+        try SQLRowCopyTests.liveRoundTrip(connection, dialect: .postgresql, trueText: "t")
+    }
+
     @Test func scramLoginOverTLS() throws {
         let connection = try PostgresTestServer.connect(sslMode: .require)
         defer { connection.close() }
