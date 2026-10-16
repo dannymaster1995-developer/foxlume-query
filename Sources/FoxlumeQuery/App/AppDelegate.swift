@@ -197,6 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.showWindow(nil)
     }
 
+    /// View › Word Wrap (⌥Z): the Settings value, so every query editor follows and the choice outlives the app.
+    @objc func toggleWordWrap(_ sender: Any?) {
+        AppEnvironment.settings.editorWordWrap.toggle()
+    }
+
     /// Older versions saved a MongoDB URI with its password in connections.json; keep the password in the Keychain instead.
     private func moveEmbeddedPasswordsToCredentialStore() {
         for saved in AppEnvironment.connections.all() {
@@ -309,5 +314,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     var activeWorkspace: WorkspaceWindowController? {
         workspaces.first { $0.window?.isKeyWindow == true } ?? workspaces.last
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    /// Ticks View › Word Wrap; every other item the delegate handles stays enabled.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleWordWrap(_:)) {
+            menuItem.state = AppEnvironment.settings.editorWordWrap ? .on : .off
+        }
+        return true
     }
 }

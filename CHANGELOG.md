@@ -29,6 +29,7 @@ First public version.
 - Foreign key navigation, Row Inspector, find in results, server-side row caps, create and drop databases and schemas.
 - Connection health checks with automatic reconnect.
 - Light, Dark and System appearance; built-in and VS Code editor themes.
+- Query editor: the statement under the cursor is shaded when the editor holds several (the statement Run Statement runs, by the same splitting rules for SQL, MongoDB and Redis), in a color derived from the editor theme, built-in or imported; Run Statement and Move to Next (⌃⌘↩) runs it with the usual checks and puts the cursor on the next statement, past comments; word wrap can be turned off from View › Word Wrap (⌥Z) to scroll long lines sideways. Both are in Settings › SQL Editor and remembered across launches.
 
 ### Fixed
 

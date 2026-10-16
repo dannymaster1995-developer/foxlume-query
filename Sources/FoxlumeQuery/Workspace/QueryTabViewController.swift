@@ -91,6 +91,8 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         completionScope = workspaceCompletionScope
         NotificationCenter.default.addObserver(self, selector: #selector(workspaceMetadataDidChange(_:)), name: ConnectionWorkspace.metadataDidChange, object: workspace)
         editor.applyFontSize(CGFloat(AppEnvironment.settings.editorFontSize))
+        applyEditorSettings()
+        NotificationCenter.default.addObserver(self, selector: #selector(settingsDidChange(_:)), name: SettingsStore.didChangeNotification, object: nil)
         editor.string = initialSQL
         savedText = initialSQL
         editor.onTextChange = { [weak self] in
@@ -213,6 +215,17 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         view.window?.makeFirstResponder(editor.textView)
     }
 
+    /// Word wrap and the current-statement band follow Settings › SQL Editor in every open tab.
+    private func applyEditorSettings() {
+        let settings = AppEnvironment.settings
+        editor.wrapsLines = settings.editorWordWrap
+        editor.highlightsCurrentStatement = settings.highlightCurrentStatement
+    }
+
+    @objc private func settingsDidChange(_ notification: Notification) {
+        applyEditorSettings()
+    }
+
     // MARK: Scripted completion checks
 
     var visibleCompletions: [String] { editor.textView.visibleCompletionLabels }
@@ -220,6 +233,19 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     var completionFrame: NSRect? { editor.textView.completionFrameForTesting }
     var completionCaretRect: NSRect? { editor.textView.completionCaretRectForTesting }
     var caretLocation: Int { editor.textView.selectedRange().location }
+    var statementBandRange: NSRange? { editor.textView.statementBandRange }
+    var statementBandRect: NSRect? { editor.textView.statementBandRectForTesting }
+    var wrapsLines: Bool { editor.wrapsLines }
+    var resultStatus: String { statusLabel.stringValue }
+    var editorForTesting: SQLEditorView { editor }
+
+    /// Puts the caret at a UTF-16 offset in the editor and shows it.
+    func placeCaret(at location: Int) {
+        focusEditor()
+        let range = NSRange(location: min(max(0, location), (editor.string as NSString).length), length: 0)
+        editor.textView.setSelectedRange(range)
+        editor.textView.scrollRangeToVisible(range)
+    }
 
     func hideCompletions() {
         editor.textView.hideCompletions()
@@ -283,6 +309,19 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         run(statement)
     }
 
+    /// ⌃⌘↩: runs what Run Statement runs, through the same checks, then puts the caret at the start of the next
+    /// statement's code. At the last statement, or when a check stops the run, the caret stays.
+    @objc func runStatementAndMoveToNext(_ sender: Any?) {
+        let text = editor.string
+        let selection = editor.textView.selectedRange()
+        guard let statement = currentStatement() else { return NSSound.beep() }
+        let next = StatementMap(text: text, language: workspace.queryLanguage).nextStatementStart(after: selection)
+        run(statement) { [weak self] in
+            guard let self, let next, self.editor.string == text else { return }
+            self.placeCaret(at: next)
+        }
+    }
+
     /// The selection, or else the statement at the caret (highlighted), as Run Statement and Explain pick it.
     func currentStatement() -> String? {
         let selection = editor.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -318,7 +357,8 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         statusLabel.stringValue = "Cancelling…"
     }
 
-    private func run(_ sql: String, unlimited: Bool = false) {
+    /// `onStart` runs once the statements are confirmed and sent.
+    private func run(_ sql: String, unlimited: Bool = false, onStart: (() -> Void)? = nil) {
         guard !isRunning else { return NSSound.beep() }
         if workspace.kind.isSQL, AppEnvironment.settings.confirmUnboundedWrites {
             let unbounded = workspace.queryLanguage.split(sql).filter { SQLStatementSplitter.unboundedWrite($0.text) != nil }
@@ -330,16 +370,16 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
                     destructive: true,
                     in: view.window
                 ) { [weak self] confirmed in
-                    if confirmed { self?.runAfterSafetyChecks(sql, unlimited: unlimited) }
+                    if confirmed { self?.runAfterSafetyChecks(sql, unlimited: unlimited, onStart: onStart) }
                 }
                 return
             }
         }
-        runAfterSafetyChecks(sql, unlimited: unlimited)
+        runAfterSafetyChecks(sql, unlimited: unlimited, onStart: onStart)
     }
 
     /// Production confirmation, then execution.
-    private func runAfterSafetyChecks(_ sql: String, unlimited: Bool) {
+    private func runAfterSafetyChecks(_ sql: String, unlimited: Bool, onStart: (() -> Void)?) {
         let limit: Int? = unlimited ? nil : AppEnvironment.settings.queryRowLimit
         let writes = workspace.writeStatements(in: sql)
         let all = workspace.queryLanguage.split(sql).map(\.text)
@@ -353,7 +393,9 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
                 : "Run \(count) statement\(count == 1 ? "" : "s") that may change data",
             in: view.window
         ) { [weak self] confirmed in
-            if confirmed { self?.execute(sql, limit: limit) }
+            guard confirmed, let self else { return }
+            self.execute(sql, limit: limit)
+            onStart?()
         }
     }
 

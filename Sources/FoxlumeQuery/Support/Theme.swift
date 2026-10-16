@@ -50,6 +50,32 @@ enum Theme {
     static let currentLine = themed(.editorCurrentLine, fallback: dynamic(light: hex(0xECF5FF), dark: hex(0x23252B)))
     static let windowBackdrop = themed(.windowBackdrop, fallback: .windowBackgroundColor)
 
+    /// The band behind the statement at the caret, worked out from the editor colors of the theme in use.
+    static let statementBand = NSColor(name: nil) { appearance in statementBandColors(for: appearance).band }
+    /// The current line inside that band.
+    static let currentLineInBand = NSColor(name: nil) { appearance in statementBandColors(for: appearance).line }
+
+    private static func statementBandColors(for appearance: NSAppearance) -> (band: NSColor, line: NSColor) {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        var colors = (band: dark ? hex(0x2A2D35) : hex(0xEEF3FA), line: dark ? hex(0x30333C) : hex(0xE2ECF8))
+        appearance.performAsCurrentDrawingAppearance {
+            func rgba(_ color: NSColor) -> RGBAColor? {
+                guard let srgb = color.usingColorSpace(.sRGB) else { return nil }
+                return RGBAColor(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent, alpha: srgb.alphaComponent)
+            }
+            func ns(_ color: RGBAColor) -> NSColor { NSColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: 1) }
+            guard let background = rgba(editorBackground) else { return }
+            let line = rgba(currentLine)
+            let band = StatementBandColor.color(
+                background: background, selection: rgba(editorSelection), currentLine: line,
+                foreground: rgba(editorForeground), dark: dark
+            )
+            let lineInBand = line.map { StatementBandColor.currentLine(band: band, background: background, currentLine: $0, dark: dark) } ?? band
+            colors = (ns(band), ns(lineInBand))
+        }
+        return colors
+    }
+
     static func monospaced(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }

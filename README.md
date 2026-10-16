@@ -37,7 +37,8 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 
 - **Context-aware autocomplete.** It knows the clause you are in, the tables and aliases in scope, CTEs and subqueries. It suggests columns with their types and keys, functions with signatures, and keywords for your database's dialect.
 - **Saved queries.** Save a query with ⌘D, organise saved queries in folders, and give one a keyword to insert it while you type.
-- **Run what you need.** Run the statement under the cursor (⌘↩), everything (⇧⌘↩) or without the row limit (⌥⌘↩). Format SQL (⇧⌘L) and keep a searchable history.
+- **Run what you need.** Run the statement under the cursor (⌘↩), everything (⇧⌘↩) or without the row limit (⌥⌘↩), or run it and move on to the next statement (⌃⌘↩) to step through a script. Format SQL (⇧⌘L) and keep a searchable history.
+- **See which statement runs.** The statement under the cursor is shaded in colors taken from your editor theme, built-in or imported. Word wrap can be turned off (View › Word Wrap, ⌥Z) to scroll long lines sideways; both are in Settings › SQL Editor.
 - **Open Quickly (⇧⌘O).** One fuzzy search across tables, views, functions, databases, saved queries and history.
 
 ### Browse and edit data
@@ -87,6 +88,10 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 | ER diagram (light) | Value viewer |
 |---|---|
 | <img src="docs/images/er-diagram-light.png" alt="ER diagram in light appearance" width="420"> | <img src="docs/images/value-viewer.png" alt="A jsonb value shown as an expandable JSON tree with key, value and type columns" width="420"> |
+
+| Statement under the cursor | Word wrap off |
+|---|---|
+| <img src="docs/images/current-statement.png" alt="The query editor shading the statement under the cursor in a script of three statements" width="420"> | <img src="docs/images/word-wrap-off.png" alt="The query editor with word wrap off, a long statement running past the right edge with a horizontal scroller" width="420"> |
 
 </details>
 
@@ -142,6 +147,7 @@ The most used ones:
 | Keys | Action |
 |---|---|
 | ⌘↩ / ⇧⌘↩ | Run statement / run all |
+| ⌃⌘↩ | Run statement and move to the next one |
 | ⇧⌘O | Open Quickly |
 | ⌃Space | Show completions |
 | ⌥⌘E / ⌃⌘E | Explain / Explain Analyze |
@@ -159,6 +165,7 @@ The most used ones:
 | ⌘T / ⌘W / ⇧⌘T | New query tab / close tab / reopen closed tab |
 | ⌘1 … ⌘9, ⌘{ ⌘} | Switch tabs |
 | ⌘↩ / ⇧⌘↩ / ⌥⌘↩ | Run statement / run all / run without limit |
+| ⌃⌘↩ | Run statement and move to the next one |
 | ⌘. | Cancel query |
 | ⇧⌘L | Format SQL |
 | ⌥⌘E / ⌃⌘E | Explain / Explain Analyze |
@@ -182,6 +189,7 @@ The most used ones:
 | ⌃⌥⌘F | Focus the sidebar filter |
 | ⌘0 | Toggle sidebar |
 | ⌘/ | Toggle comment |
+| ⌥Z | Word wrap on or off |
 | ⌥⌘C / ⌥⌘J | Copy with headers / copy as JSON |
 | ⌘V | Paste cells or rows into the grid |
 | Shift-click a header | Add a column to the sort |

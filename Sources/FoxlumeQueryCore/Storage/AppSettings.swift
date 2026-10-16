@@ -10,6 +10,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var autocompleteOnTyping: Bool = true
     /// How completed keywords are cased (Settings › SQL Editor).
     public var keywordCase: KeywordCase = .matchTypedElseUpper
+    /// Wrap long lines in the query editor; off scrolls horizontally (View › Word Wrap).
+    public var editorWordWrap: Bool = true
+    /// Shade the statement at the caret when the query editor holds several.
+    public var highlightCurrentStatement: Bool = true
     public var confirmWritesOnProduction: Bool = true
     public var showRowNumbers: Bool = true
     /// List engine-internal databases (mysql, sys, information_schema, admin, …) in the switcher.
@@ -33,6 +37,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         gridFontSize = try container.decodeIfPresent(Double.self, forKey: .gridFontSize) ?? defaults.gridFontSize
         autocompleteOnTyping = try container.decodeIfPresent(Bool.self, forKey: .autocompleteOnTyping) ?? defaults.autocompleteOnTyping
         keywordCase = try container.decodeIfPresent(KeywordCase.self, forKey: .keywordCase) ?? defaults.keywordCase
+        editorWordWrap = try container.decodeIfPresent(Bool.self, forKey: .editorWordWrap) ?? defaults.editorWordWrap
+        highlightCurrentStatement = try container.decodeIfPresent(Bool.self, forKey: .highlightCurrentStatement) ?? defaults.highlightCurrentStatement
         confirmWritesOnProduction = try container.decodeIfPresent(Bool.self, forKey: .confirmWritesOnProduction) ?? defaults.confirmWritesOnProduction
         showRowNumbers = try container.decodeIfPresent(Bool.self, forKey: .showRowNumbers) ?? defaults.showRowNumbers
         showSystemDatabases = try container.decodeIfPresent(Bool.self, forKey: .showSystemDatabases) ?? defaults.showSystemDatabases

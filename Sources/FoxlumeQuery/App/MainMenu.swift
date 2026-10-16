@@ -33,6 +33,8 @@ import AppKit
     @objc optional func formatQuery(_ sender: Any?)
     @objc optional func promptConnectionURL(_ sender: Any?)
     @objc optional func runWithoutLimit(_ sender: Any?)
+    @objc optional func runStatementAndMoveToNext(_ sender: Any?)
+    @objc optional func toggleWordWrap(_ sender: Any?)
     @objc optional func explainQuery(_ sender: Any?)
     @objc optional func explainAnalyzeQuery(_ sender: Any?)
     @objc optional func duplicateRows(_ sender: Any?)
@@ -122,6 +124,7 @@ enum MainMenu {
             item("Run Statement", #selector(FoxlumeQueryActions.runCurrent(_:)), "\r"),
             item("Run All", #selector(FoxlumeQueryActions.runAll(_:)), "\r", [.command, .shift]),
             item("Run Without Limit", #selector(FoxlumeQueryActions.runWithoutLimit(_:)), "\r", [.command, .option]),
+            item("Run Statement and Move to Next", #selector(FoxlumeQueryActions.runStatementAndMoveToNext(_:)), "\r", [.command, .control]),
             item("Cancel Query", #selector(FoxlumeQueryActions.cancelQuery(_:)), "."),
             item("Explain", #selector(FoxlumeQueryActions.explainQuery(_:)), "e", [.command, .option]),
             item("Explain Analyze", #selector(FoxlumeQueryActions.explainAnalyzeQuery(_:)), "e", [.command, .control]),
@@ -169,6 +172,8 @@ enum MainMenu {
             item("Saved Queries", #selector(FoxlumeQueryActions.showSavedQueries(_:))),
             item("Focus Sidebar Filter", #selector(FoxlumeQueryActions.focusTableFilter(_:)), "f", [.command, .option, .control]),
             item("Jump to Column…", #selector(FoxlumeQueryActions.jumpToColumn(_:)), "j", [.command, .control]),
+            .separator(),
+            item("Word Wrap", #selector(FoxlumeQueryActions.toggleWordWrap(_:)), "z", [.option]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ]))

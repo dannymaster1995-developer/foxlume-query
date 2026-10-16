@@ -97,6 +97,17 @@ final class SQLEditorView: NSView {
         set { textView.language = newValue }
     }
 
+    /// Off: long lines run on and the editor scrolls horizontally.
+    var wrapsLines = true {
+        didSet { if wrapsLines != oldValue { applyWrapping() } }
+    }
+
+    /// Shades the statement at the caret when the text holds several.
+    var highlightsCurrentStatement: Bool {
+        get { textView.highlightsCurrentStatement }
+        set { textView.highlightsCurrentStatement = newValue }
+    }
+
     override init(frame frameRect: NSRect) {
         let container = NSTextContainer(size: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
@@ -129,6 +140,7 @@ final class SQLEditorView: NSView {
         scrollView.rulersVisible = true
         ruler.observeScrolling(of: scrollView.contentView)
         addSubviewFilling(scrollView)
+        NotificationCenter.default.addObserver(self, selector: #selector(clipFrameDidChange), name: NSView.frameDidChangeNotification, object: scrollView.contentView)
     }
 
     required init?(coder: NSCoder) {
@@ -151,6 +163,49 @@ final class SQLEditorView: NSView {
         ruler.font = Theme.monospaced(max(9, size - 2))
         ruler.needsDisplay = true
     }
+
+    /// Wrapping lets the text container follow the text view's width; without it the container is unbounded and
+    /// the text view grows to the longest line, never narrower than the visible area.
+    private func applyWrapping() {
+        guard let container = textView.textContainer else { return }
+        let width = visibleTextWidth
+        if wrapsLines {
+            scrollView.hasHorizontalScroller = false
+            textView.isHorizontallyResizable = false
+            textView.autoresizingMask = [.width]
+            textView.minSize = NSSize(width: 0, height: 0)
+            textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+            container.containerSize = NSSize(width: max(0, width - textView.textContainerInset.width * 2), height: CGFloat.greatestFiniteMagnitude)
+            container.widthTracksTextView = true
+            scrollView.contentView.scroll(to: NSPoint(x: -scrollView.contentView.contentInsets.left, y: scrollView.contentView.bounds.minY))
+        } else {
+            container.widthTracksTextView = false
+            container.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            textView.isHorizontallyResizable = true
+            textView.autoresizingMask = []
+            textView.minSize = NSSize(width: width, height: 0)
+            scrollView.hasHorizontalScroller = true
+            textView.sizeToFit()
+        }
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        ruler.needsDisplay = true
+        textView.needsDisplay = true
+    }
+
+    /// The width the text has beside the line numbers: the ruler lies over the clip view, which insets its content.
+    var visibleTextWidth: CGFloat {
+        scrollView.contentView.bounds.width - scrollView.contentView.contentInsets.left
+    }
+
+    /// Without wrapping the text view keeps at least the visible width, so the current line and statement band
+    /// reach the right edge after the editor grows.
+    @objc private func clipFrameDidChange() {
+        guard !wrapsLines else { return }
+        let width = visibleTextWidth
+        guard textView.minSize.width != width else { return }
+        textView.minSize = NSSize(width: width, height: 0)
+        textView.sizeToFit()
+    }
 }
 
 final class SQLTextView: NSTextView {
@@ -162,6 +217,7 @@ final class SQLTextView: NSTextView {
         didSet {
             lexCheckpoints = []
             scheduleHighlight(immediately: true)
+            rebuildStatementMap()
         }
     }
 
@@ -195,6 +251,7 @@ final class SQLTextView: NSTextView {
         if let textStorage {
             // Every character edit, typed, pasted, undone or set, invalidates the rewriter's lexer checkpoints after it.
             NotificationCenter.default.addObserver(self, selector: #selector(dropLexCheckpoints(_:)), name: NSTextStorage.didProcessEditingNotification, object: textStorage)
+            NotificationCenter.default.addObserver(self, selector: #selector(shiftStatementMap(_:)), name: NSTextStorage.didProcessEditingNotification, object: textStorage)
         }
         setAccessibilityIdentifier("sqlEditor")
     }
@@ -218,6 +275,7 @@ final class SQLTextView: NSTextView {
     func didReplaceText() {
         endCompletionSession()
         scheduleHighlight(immediately: true)
+        rebuildStatementMap()
         onChange?()
     }
 
@@ -236,11 +294,93 @@ final class SQLTextView: NSTextView {
         scheduleHighlight(immediately: true)
     }
 
+    // MARK: Current statement
+
+    /// Set by the owner from Settings › SQL Editor; off by default so previews and sheets show no band.
+    var highlightsCurrentStatement = false {
+        didSet {
+            guard highlightsCurrentStatement != oldValue else { return }
+            rebuildStatementMap()
+        }
+    }
+
+    /// The statements as last split; between an edit and the next split, shifted by the edit.
+    private(set) var statementMap = StatementMap()
+    /// The statement at the caret, with its `;`, while the band is shown.
+    private(set) var statementBandRange: NSRange?
+    private var statementMapWork: DispatchWorkItem?
+    /// The pause after the last edit before the text is split again, so typing in a long script stays smooth.
+    static var statementMapDelay: TimeInterval = 0.25
+
+    /// Splits the text now, or empties the map when the band is off.
+    func rebuildStatementMap() {
+        statementMapWork?.cancel()
+        statementMapWork = nil
+        statementMap = highlightsCurrentStatement ? StatementMap(text: string, language: language) : StatementMap()
+        updateStatementBand()
+    }
+
+    private func scheduleStatementMap() {
+        guard highlightsCurrentStatement else { return }
+        statementMapWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.rebuildStatementMap() }
+        statementMapWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.statementMapDelay, execute: work)
+    }
+
+    /// The characters an edit replaces and the length of their replacement, from shouldChangeText. The storage's
+    /// edited range can also cover attributes fixed around the edit, so it is used only when this is missing.
+    private var pendingStatementEdit: (range: NSRange, newLength: Int)?
+
+    @objc private func shiftStatementMap(_ notification: Notification) {
+        let pending = pendingStatementEdit
+        pendingStatementEdit = nil
+        guard !statementMap.entries.isEmpty, let storage = notification.object as? NSTextStorage,
+              storage.editedMask.contains(.editedCharacters)
+        else { return }
+        let delta = storage.changeInLength
+        var edited = storage.editedRange
+        if let pending, pending.newLength - pending.range.length == delta {
+            edited = NSRange(location: pending.range.location, length: pending.newLength)
+        }
+        statementMap = statementMap.shifted(byEditing: edited, changeInLength: delta)
+    }
+
+    private func updateStatementBand() {
+        let selection = selectedRange()
+        let band = highlightsCurrentStatement && selection.length == 0 ? statementMap.bandRange(at: selection.location) : nil
+        guard band != statementBandRange else { return }
+        statementBandRange = band
+        needsDisplay = true
+    }
+
+    /// Full-width rect from the band's first line to its last, in view coordinates.
+    private func statementBandRect(_ range: NSRange) -> NSRect? {
+        guard let layoutManager, let textContainer else { return nil }
+        let length = (string as NSString).length
+        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: length))
+        guard clamped.length > 0 else { return nil }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: clamped, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        let first = layoutManager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        let last = layoutManager.lineFragmentRect(forGlyphAt: NSMaxRange(glyphs) - 1, effectiveRange: nil)
+        _ = textContainer
+        return NSRect(x: 0, y: first.minY + textContainerOrigin.y, width: bounds.width, height: last.maxY - first.minY)
+    }
+
+    /// The band's rect in view coordinates, for tests and scripted checks.
+    var statementBandRectForTesting: NSRect? { statementBandRange.flatMap(statementBandRect) }
+
     // MARK: Current line
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard let layoutManager, let textContainer, window?.firstResponder === self, selectedRange().length == 0 else { return }
+        let band = statementBandRange
+        if let band, let bandRect = statementBandRect(band)?.intersection(rect), !bandRect.isEmpty {
+            Theme.statementBand.setFill()
+            bandRect.fill()
+        }
         let text = string as NSString
         let location = min(selectedRange().location, text.length)
         var lineRect: NSRect
@@ -258,13 +398,15 @@ final class SQLTextView: NSTextView {
         lineRect.size.width = bounds.width
         lineRect.origin.y += textContainerOrigin.y
         _ = textContainer
-        Theme.currentLine.setFill()
+        // The band always holds the caret's line.
+        (band == nil ? Theme.currentLine : Theme.currentLineInBand).setFill()
         lineRect.fill()
     }
 
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
         needsDisplay = true
+        updateStatementBand()
         // Edits handle the list once they finish; a plain caret move re-filters it or closes it (spec 1.5).
         guard completionSession != nil, !editingText, !isProgrammaticEdit, typedInsertDepth == 0, !hasMarkedText() else { return }
         refilterCompletionSession()
@@ -446,6 +588,9 @@ final class SQLTextView: NSTextView {
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
         let allowed = super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
         editingText = allowed
+        if allowed, let replacementString {
+            pendingStatementEdit = (affectedCharRange, (replacementString as NSString).length)
+        }
         return allowed
     }
 
@@ -453,6 +598,8 @@ final class SQLTextView: NSTextView {
         super.didChangeText()
         editingText = false
         scheduleHighlight()
+        scheduleStatementMap()
+        updateStatementBand()
         onChange?()
         // Deletions, cuts and undo re-filter an open list (Backspace widens it) but never open one.
         guard completionSession != nil, !isProgrammaticEdit, typedInsertDepth == 0, !hasMarkedText() else { return }
@@ -811,11 +958,34 @@ final class LineNumberRulerView: NSRulerView {
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
         Theme.editorBackground.setFill()
         bounds.fill()
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: Theme.editorLineNumber]
+        let labels = visibleLineLabels()
+        let digits = max(2, String((labels.first?.number ?? 1) + 200).count)
+        let width = CGFloat(digits) * 8 + 14
+        if abs(ruleThickness - width) > 1 { ruleThickness = width }
+        for label in labels {
+            let text = "\(label.number)" as NSString
+            let size = text.size(withAttributes: attributes)
+            text.draw(at: NSPoint(x: ruleThickness - size.width - 6, y: label.midY - size.height / 2), withAttributes: attributes)
+        }
+    }
+
+    struct LineLabel {
+        var number: Int
+        /// The vertical middle of the line's first fragment, in ruler coordinates.
+        var midY: CGFloat
+    }
+
+    /// The line numbers in view and where they go. Only the vertical extent counts, so a horizontally scrolled
+    /// editor without wrapping still numbers every visible line, short ones included.
+    func visibleLineLabels() -> [LineLabel] {
+        guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return [] }
         let text = textView.string as NSString
-        let visible = textView.visibleRect
+        var visible = textView.visibleRect
+        visible.origin.x = 0
+        visible.size.width = textView.bounds.width
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: container)
         let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
 
@@ -824,12 +994,8 @@ final class LineNumberRulerView: NSRulerView {
             let prefix = text.substring(to: charRange.location)
             lineNumber = prefix.reduce(into: 1) { count, char in if char == "\n" { count += 1 } }
         }
-        let digits = max(2, String(lineNumber + 200).count)
-        let width = CGFloat(digits) * 8 + 14
-        if abs(ruleThickness - width) > 1 { ruleThickness = width }
-
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: Theme.editorLineNumber]
         let origin = convert(NSPoint.zero, from: textView).y + textView.textContainerInset.height
+        var labels: [LineLabel] = []
         var index = charRange.location
         let end = NSMaxRange(charRange)
         repeat {
@@ -837,17 +1003,14 @@ final class LineNumberRulerView: NSRulerView {
             let glyph = layoutManager.glyphIndexForCharacter(at: min(index, max(0, text.length - 1)))
             var fragment = text.length == 0 ? layoutManager.extraLineFragmentRect : layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
             if text.length == 0 { fragment.size.height = max(fragment.height, font.boundingRectForFont.height) }
-            let label = "\(lineNumber)" as NSString
-            let size = label.size(withAttributes: attributes)
-            label.draw(at: NSPoint(x: ruleThickness - size.width - 6, y: origin + fragment.minY + (fragment.height - size.height) / 2), withAttributes: attributes)
+            labels.append(LineLabel(number: lineNumber, midY: origin + fragment.midY))
             lineNumber += 1
             index = NSMaxRange(lineRange)
         } while index < end
         if text.length > 0, text.character(at: text.length - 1) == 10, end >= text.length {
             let fragment = layoutManager.extraLineFragmentRect
-            let label = "\(lineNumber)" as NSString
-            let size = label.size(withAttributes: attributes)
-            label.draw(at: NSPoint(x: ruleThickness - size.width - 6, y: origin + fragment.minY + (fragment.height - size.height) / 2), withAttributes: attributes)
+            labels.append(LineLabel(number: lineNumber, midY: origin + fragment.midY))
         }
+        return labels
     }
 }

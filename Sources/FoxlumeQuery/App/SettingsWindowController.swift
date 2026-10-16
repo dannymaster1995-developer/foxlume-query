@@ -68,6 +68,12 @@ struct SettingsView: View {
             Section("SQL Editor") {
                 Stepper("Font size: \(Int(settings.editorFontSize)) pt", value: $settings.editorFontSize, in: 9...28, step: 1)
                 Toggle("Suggest completions while typing", isOn: $settings.autocompleteOnTyping)
+                Toggle("Wrap long lines", isOn: $settings.editorWordWrap)
+                    .help("Off: long lines run on and the editor scrolls sideways. View › Word Wrap (⌥Z) switches it too.")
+                    .accessibilityIdentifier("editorWordWrap")
+                Toggle("Highlight the statement at the cursor", isOn: $settings.highlightCurrentStatement)
+                    .help("Shades the statement that Run Statement (⌘↩) would run when the editor holds several.")
+                    .accessibilityIdentifier("highlightCurrentStatement")
                 Picker("Keyword case", selection: $settings.keywordCase) {
                     ForEach(KeywordCase.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
