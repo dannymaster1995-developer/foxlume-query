@@ -22,6 +22,8 @@ protocol DataGridViewDelegate: AnyObject {
     func dataGridSavedColumnLayout(_ grid: DataGridView) -> GridColumnLayout?
     /// The user moved, resized, hid or showed columns; nil after Reset Column Layout.
     func dataGrid(_ grid: DataGridView, didChangeColumnLayout layout: GridColumnLayout?)
+    /// Rows of the table a foreign key column references, for its value picker; `text` searches key and label.
+    func dataGrid(_ grid: DataGridView, referenceCandidatesForColumn column: Int, matching text: String) async throws -> [ReferenceCandidate]
 }
 
 extension DataGridViewDelegate {
@@ -39,6 +41,7 @@ extension DataGridViewDelegate {
     func dataGrid(_ grid: DataGridView, filterColumn column: Int) {}
     func dataGridSavedColumnLayout(_ grid: DataGridView) -> GridColumnLayout? { nil }
     func dataGrid(_ grid: DataGridView, didChangeColumnLayout layout: GridColumnLayout?) {}
+    func dataGrid(_ grid: DataGridView, referenceCandidatesForColumn column: Int, matching text: String) async throws -> [ReferenceCandidate] { [] }
 }
 
 /// A new value for one cell: display row and data column.
@@ -124,6 +127,15 @@ final class DataGridView: NSView {
     var referenceColumns: Set<Int> = [] {
         didSet { if referenceColumns != oldValue { tableView.reloadData() } }
     }
+
+    /// Typed editors by data column (see DataGridView+CellEditors.swift); columns not listed edit as text.
+    var columnEditors: [Int: GridColumnEditor] = [:] {
+        didSet { if columnEditors != oldValue { tableView.reloadData() } }
+    }
+    /// The panel under the cell being edited, for date, enum and foreign key columns.
+    var cellEditorPanel: GridCellEditorPanel?
+    /// Set while the panel throws the typed text away to stage NULL instead.
+    var isAbortingCellEdit = false
 
     // Find bar state (see DataGridView+Find.swift).
     let findBar = GridFindBar()
@@ -219,6 +231,8 @@ final class DataGridView: NSView {
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(gridDidScroll), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         findBar.translatesAutoresizingMaskIntoConstraints = false
         findBar.isHidden = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -237,6 +251,10 @@ final class DataGridView: NSView {
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         configureFindBar()
+    }
+
+    @objc private func gridDidScroll() {
+        repositionCellEditorPanel()
     }
 
     @objc private func themeChanged() {
@@ -407,6 +425,7 @@ final class DataGridView: NSView {
         guard let cell = tableView.view(atColumn: tableColumn, row: row, makeIfNecessary: true) as? GridCellView else { return }
         cell.prepareForEditing()
         tableView.editColumn(tableColumn, row: row, with: nil, select: true)
+        openCellEditorPanel(row: row, column: column, tableColumn: tableColumn)
     }
 
     fileprivate func commitEdit(row: Int, column: Int, text: String) {
@@ -552,6 +571,7 @@ extension DataGridView: NSTableViewDataSource, NSTableViewDelegate {
         if tableColumn.identifier == Self.rowNumberIdentifier {
             cell.configure(text: String(content.rowOffset + row + 1), style: .rowNumber, state: state, editable: false)
             cell.setReference(visible: false, action: nil)
+            cell.setToggle(nil)
             cell.setFindHighlight(.none)
             cell.setSelectionMark(selectionMark(row: row, tableColumn: tableColumn))
             return cell
@@ -566,6 +586,7 @@ extension DataGridView: NSTableViewDataSource, NSTableViewDelegate {
             let isExpression: Bool = { if case .expression = value { return true } else { return false } }()
             let style: GridCellView.Style = value.isAbsent || isExpression ? .null : (content.columns[safe: column]?.isNumeric == true ? .number : .text)
             cell.configure(text: Self.displayText(value), style: style, state: state, editable: editable)
+            cell.setToggle(toggleState(for: value, column: column))
             cell.editingText = value.isAbsent ? "" : value.displayString
             let key = GridCellKey(row: row, column: column)
             cell.setFindHighlight(currentFindMatch.flatMap { findMatches[safe: $0] } == key ? .current : (findMatchSet.contains(key) ? .match : .none))
@@ -576,6 +597,7 @@ extension DataGridView: NSTableViewDataSource, NSTableViewDelegate {
             }
         } else {
             cell.configure(text: "DEFAULT", style: .null, state: state, editable: editable)
+            cell.setToggle(nil)
             cell.editingText = ""
             cell.setReference(visible: false, action: nil)
             cell.setFindHighlight(.none)
@@ -625,8 +647,14 @@ extension DataGridView: NSTableViewDataSource, NSTableViewDelegate {
 }
 
 extension DataGridView: NSTextFieldDelegate {
+    func controlTextDidChange(_ notification: Notification) {
+        guard let editor = notification.userInfo?["NSFieldEditor"] as? NSTextView else { return }
+        cellEditorPanel?.cellTextDidChange(editor.string)
+    }
+
     func controlTextDidEndEditing(_ notification: Notification) {
-        guard let field = notification.object as? NSTextField else { return }
+        closeCellEditorPanel()
+        guard !isAbortingCellEdit, let field = notification.object as? NSTextField else { return }
         let row = tableView.row(for: field)
         let tableColumn = tableView.column(for: field)
         let movement = notification.userInfo?["NSTextMovement"] as? Int
@@ -648,7 +676,9 @@ extension DataGridView: NSTextFieldDelegate {
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if cellEditorPanelHandles(commandSelector) { return true }
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            closeCellEditorPanel()
             control.abortEditing()
             tableView.window?.makeFirstResponder(tableView)
             tableView.reloadData()

@@ -92,7 +92,9 @@ extension PostgresConnection {
             SELECT a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull,
                    pg_catalog.pg_get_expr(d.adbin, d.adrelid), pg_catalog.col_description(a.attrelid, a.attnum),
                    \(identity), \(generated),
-                   CASE WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation THEN co.collname END
+                   CASE WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation THEN co.collname END,
+                   CASE WHEN t.typtype = 'e' THEN (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder)
+                                                   FROM pg_catalog.pg_enum e WHERE e.enumtypid = t.oid) END
             FROM pg_catalog.pg_attribute a
             LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
             LEFT JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
@@ -135,13 +137,20 @@ extension PostgresConnection {
                 comment: row[4].textValue,
                 extra: extra,
                 collation: row.count > 7 ? row[7].textValue : nil,
-                generationExpression: generationExpression
+                generationExpression: generationExpression,
+                enumValues: row.count > 8 ? Self.enumLabels(row[8].textValue) : nil
             )
         }
         return TableStructure(table: relation.ref, columns: columns, indexes: indexes, foreignKeys: foreignKeys, comment: relation.comment)
     }
 
     /// One row per index key column, grouped here so the key order survives. Expression keys use their text.
+    /// The JSON array of labels the structure query returns for an enum column.
+    static func enumLabels(_ json: String?) -> [String]? {
+        guard let data = json?.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([String].self, from: data)
+    }
+
     private func indexes(of relation: Relation) throws -> [IndexInfo] {
         // INCLUDE columns (PostgreSQL 11+) are not part of the key.
         let keyCount = serverVersionNumber >= 110_000 ? "i.indnkeyatts" : "i.indnatts"

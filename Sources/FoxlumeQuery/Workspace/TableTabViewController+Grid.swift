@@ -41,6 +41,31 @@ extension TableTabViewController {
         showFilters(adding: FilterRule(column: name, op: .equals))
     }
 
+    // MARK: Cell editors
+
+    /// Check boxes, date pickers, enum lists and foreign key pickers for the columns that get them (SQL tables only).
+    func columnEditors(for columns: [ResultColumn]) -> [Int: GridColumnEditor] {
+        guard workspace.kind.isSQL, let structure else { return [:] }
+        var editors: [Int: GridColumnEditor] = [:]
+        for (index, column) in columns.enumerated() {
+            guard let info = structure.columns.first(where: { $0.name == column.name }) else { continue }
+            let kind = CellEditorKind.classify(info, kind: workspace.kind)
+            let reference = ReferencePicker.foreignKey(forColumn: info.name, in: structure)
+            guard kind != .text || reference != nil else { continue }
+            editors[index] = GridColumnEditor(kind: kind, isNullable: info.isNullable, reference: reference)
+        }
+        return editors
+    }
+
+    /// The foreign key picker's rows: the referenced key and the referenced table's first text column, searched on
+    /// the server.
+    func dataGrid(_ grid: DataGridView, referenceCandidatesForColumn column: Int, matching text: String) async throws -> [ReferenceCandidate] {
+        guard let key = grid.columnEditors[column]?.reference, let keyColumn = key.referencedColumns.first else { return [] }
+        let referenced = try? await workspace.structure(of: key.referencedTable)
+        let label = referenced.flatMap { ReferenceCandidates.labelColumn(in: $0, key: keyColumn) }
+        return try await workspace.referenceCandidates(ReferenceCandidateRequest(table: key.referencedTable, keyColumn: keyColumn, labelColumn: label, search: text))
+    }
+
     // MARK: Column layout
 
     /// The table's remembered column order, widths and hidden columns, given to the grid when it builds its columns.

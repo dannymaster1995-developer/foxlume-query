@@ -139,6 +139,13 @@ extension DataGridView {
            cellView.isReferenceButtonHit(at: cellView.convert(point, from: tableView)) {
             return false
         }
+        if event.clickCount == 1, event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty,
+           let cellView = tableView.view(atColumn: tableColumn, row: row, makeIfNecessary: false) as? GridCellView,
+           cellView.isToggleHit(at: cellView.convert(point, from: tableView)),
+           toggleIfOnlyActiveCell(GridCell(row: row, column: position)) {
+            tableView.window?.makeFirstResponder(tableView)
+            return true
+        }
         tableView.window?.makeFirstResponder(tableView)
         if event.clickCount >= 2 {
             beginEditing(row: row, tableColumn: tableColumn)
@@ -236,6 +243,9 @@ extension DataGridView {
             guard !cellSelection.isEmpty else { return false }
             setCellSelection(.empty)
             return true
+        case 49 where flags.isEmpty:
+            // Space flips boolean cells; elsewhere it is left to the table.
+            return toggleBooleanCells()
         case 49 where flags == [.shift]:
             guard !cellSelection.isEmpty else { return false }
             let rows = cellSelection.affectedRows

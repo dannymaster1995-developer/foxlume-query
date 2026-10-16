@@ -32,6 +32,15 @@ import FoxlumeQueryCore
 ///     jumpcolumn <text>                 ⌃⌘J, types the text, logs the matches and presses Return
 ///     columnslist [<text>]|close        opens the Columns list (filtered by the text) and logs it, or closes it
 ///     closetab                          closes the selected tab
+///     editors                           logs the typed editor of each column (boolean, date, enum, reference)
+///     celledit <row> <column>           starts editing a cell (double-click) and logs its text and panel
+///     celleditor                        logs the cell being edited: text, picker or list, footer
+///     celltype <text>                   types into the cell being edited (replacing its text); \s is a space
+///     cellcommand down|up|return|escape  a key typed in the cell being edited
+///     cellpick <n>|NULL                 clicks the n-th row (from 1) of the panel's list, or its NULL row
+///     cellpickdate <yyyy-mm-dd>|- [<hh:mm:ss>]   picks a day and a time in the date panel
+///     cellnow / cellnull / celldone     the date panel's Now (Today), NULL and Done buttons
+///     boxclick <row> <column>           a click on the check box of a boolean cell
 @MainActor
 enum GridAutoTest {
     static let commands: Set<String> = [
@@ -39,6 +48,7 @@ enum GridAutoTest {
         "pastetext", "cellmenu", "cellfilter", "fillcells", "fillcolumn", "fillvalue", "filteradd", "filterlogic",
         "presetsave", "presetapply", "presetdelete", "presetlist", "deleteselected", "duplicateselected",
         "columnlayout", "headeraction", "showcolumn", "resizecolumn", "movecolumn", "jumpcolumn", "columnslist", "closetab",
+        "editors", "celledit", "celleditor", "celltype", "cellcommand", "cellpick", "cellpickdate", "cellnow", "cellnull", "celldone", "boxclick",
     ]
 }
 
@@ -221,12 +231,96 @@ extension AutoTestRunner {
                 try await Task.sleep(nanoseconds: 300_000_000)
                 record("  list: " + picker.visibleTitles.joined(separator: ", "))
             }
+        case "editors", "celledit", "celleditor", "celltype", "cellcommand", "cellpick", "cellpickdate", "cellnow", "cellnull", "celldone", "boxclick":
+            try await performCellEditor(command, argument, grid: grid, column: column, cell: cell)
         case "deleteselected":
             tableTab?.deleteSelectedRows(nil)
         case "duplicateselected":
             tableTab?.duplicateRows(nil)
         default:
             throw DatabaseError.unsupported("Unknown command \(command)")
+        }
+    }
+
+    private func performCellEditor(_ command: String, _ argument: String, grid: DataGridView, column: (String) throws -> Int, cell: (String, String) throws -> GridCell) async throws {
+        let words = argument.split(separator: " ").map(String.init)
+        switch command {
+        case "editors":
+            let described = grid.content.columns.indices.compactMap { index -> String? in
+                guard let editor = grid.columnEditors[index] else { return nil }
+                var text: String
+                switch editor.kind {
+                case .text: text = "text"
+                case .boolean(let style): text = "boolean(\(style.text(true))/\(style.text(false)))"
+                case .temporal(let kind): text = "\(kind)"
+                case .choice(let labels): text = "enum[" + labels.joined(separator: ",") + "]"
+                }
+                if let key = editor.reference { text += " → \(key.referencedTable.name).\(key.referencedColumns.joined(separator: ","))" }
+                return "\(grid.content.columns[index].name) \(text)\(editor.isNullable ? "" : " not null")"
+            }
+            record("  editors: " + described.joined(separator: "; "))
+        case "celledit":
+            guard words.count == 2, let row = Int(words[0]), let tableColumn = grid.tableColumn(forDataColumn: try column(words[1])),
+                  let index = grid.tableView.tableColumns.firstIndex(of: tableColumn) else { throw DatabaseError.unsupported("celledit <row> <column>") }
+            grid.beginEditing(row: row, tableColumn: index)
+            try await waitForCellEditor(grid)
+            record("  " + grid.cellEditorDescription)
+        case "celleditor":
+            record("  " + grid.cellEditorDescription)
+        case "celltype":
+            let searches = grid.cellEditorPanel?.searchesFinished ?? 0
+            grid.typeInCellEditor(Self.typedText(argument))
+            if grid.cellEditorPanel?.editor.reference != nil {
+                try await waitFor(seconds: 10) { (grid.cellEditorPanel?.searchesFinished ?? 0) > searches }
+            }
+            record("  " + grid.cellEditorDescription)
+        case "cellcommand":
+            let selectors: [String: Selector] = ["down": #selector(NSResponder.moveDown(_:)), "up": #selector(NSResponder.moveUp(_:)),
+                                                 "return": #selector(NSResponder.insertNewline(_:)), "escape": #selector(NSResponder.cancelOperation(_:))]
+            guard let selector = selectors[argument] else { throw DatabaseError.unsupported("cellcommand down|up|return|escape") }
+            grid.sendCellEditorCommand(selector)
+            try await Task.sleep(nanoseconds: 200_000_000)
+            record("  " + grid.cellEditorDescription)
+        case "cellpick":
+            guard let panel = grid.cellEditorPanel else { throw DatabaseError.unsupported("No cell editor panel") }
+            if argument == "NULL" {
+                panel.pick(listRow: 0)
+            } else {
+                guard let index = Int(argument) else { throw DatabaseError.unsupported("cellpick <n>|NULL") }
+                panel.pick(listRow: index - 1)
+            }
+            try await Task.sleep(nanoseconds: 200_000_000)
+        case "cellpickdate":
+            guard let panel = grid.cellEditorPanel, !words.isEmpty else { throw DatabaseError.unsupported("cellpickdate <yyyy-mm-dd>|- [<hh:mm:ss>]") }
+            let day = TemporalText.parse(words[0], kind: .date)?.day
+            let clock = words.count > 1 ? TemporalText.parse(words[1], kind: .time(withTimeZone: false))?.clock : nil
+            panel.pick(day: day, clock: clock)
+            record("  " + grid.cellEditorDescription)
+        case "cellnow", "cellnull", "celldone":
+            guard let panel = grid.cellEditorPanel else { throw DatabaseError.unsupported("No cell editor panel") }
+            switch command {
+            case "cellnow": panel.setNow(nil)
+            case "cellnull": panel.setNull(nil)
+            default: panel.done(nil)
+            }
+            try await Task.sleep(nanoseconds: 200_000_000)
+            record("  " + grid.cellEditorDescription)
+        default:
+            guard words.count == 2 else { throw DatabaseError.unsupported("boxclick <row> <column>") }
+            let target = try cell(words[0], words[1])
+            if !grid.toggleIfOnlyActiveCell(target) {
+                // As a first click: it only selects the cell.
+                grid.setCellSelection(.single(target))
+                record("  selected")
+            }
+        }
+    }
+
+    /// The panel opens at once; a foreign key picker then waits for its first rows.
+    private func waitForCellEditor(_ grid: DataGridView) async throws {
+        try await Task.sleep(nanoseconds: 200_000_000)
+        if grid.cellEditorPanel?.editor.reference != nil {
+            try await waitFor(seconds: 10) { (grid.cellEditorPanel?.searchesFinished ?? 0) > 0 }
         }
     }
 

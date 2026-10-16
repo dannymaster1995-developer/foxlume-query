@@ -108,6 +108,9 @@ public protocol DatabaseConnection: AnyObject {
     /// few catalog queries, for the ER diagram. Columns carry name, type, nullability and primary key only. Nil when
     /// the engine has no bulk reader; the caller then reads `structure(of:)` table by table. See DiagramMetadata.swift.
     func diagramStructures(schema: String?) throws -> [TableStructure]?
+    /// Rows of a referenced table for the foreign key value picker: key and label, searched on the server, at most
+    /// `request.limit`. Empty for engines without foreign keys. See ReferenceCandidates.swift.
+    func referenceCandidates(_ request: ReferenceCandidateRequest) throws -> [ReferenceCandidate]
 }
 
 /// Keys found by a scan, for the Redis key tree.
@@ -246,6 +249,12 @@ public extension DatabaseConnection {
     func checkConstraints(of table: TableRef) throws -> [CheckConstraintInfo] { [] }
 
     func diagramStructures(schema: String?) throws -> [TableStructure]? { nil }
+
+    func referenceCandidates(_ request: ReferenceCandidateRequest) throws -> [ReferenceCandidate] {
+        guard case .sql = capabilities.queryLanguage else { return [] }
+        let result = try execute(ReferenceCandidates.sql(request, dialect: dialect), rowLimit: request.limit).last { $0.hasResultSet }
+        return result.map { ReferenceCandidates.candidates(from: $0, hasLabel: request.labelColumn != nil) } ?? []
+    }
 
     func ping() throws {
         switch capabilities.queryLanguage {

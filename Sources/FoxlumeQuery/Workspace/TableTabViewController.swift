@@ -341,6 +341,7 @@ final class TableTabViewController: NSViewController, WorkspaceTabContent {
                 grid.setContent(content)
                 grid.setSortIndicator(query.sort)
                 grid.referenceColumns = referenceColumnIndexes(for: result.columns)
+                grid.columnEditors = columnEditors(for: result.columns)
                 refreshInspector()
                 lastLoadDuration = Date().timeIntervalSince(started)
                 lastError = nil

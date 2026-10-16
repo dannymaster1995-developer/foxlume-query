@@ -54,6 +54,9 @@ public struct ColumnInfo: Hashable, Sendable {
     public var collation: String?
     /// Expression of a generated (computed) column.
     public var generationExpression: String?
+    /// Labels of a PostgreSQL enum type in their sort order; nil for other types. MySQL and DuckDB enums are read
+    /// from `dataType` instead (see `EnumLabels`).
+    public var enumValues: [String]?
 
     public init(
         name: String,
@@ -65,7 +68,8 @@ public struct ColumnInfo: Hashable, Sendable {
         comment: String? = nil,
         extra: String? = nil,
         collation: String? = nil,
-        generationExpression: String? = nil
+        generationExpression: String? = nil,
+        enumValues: [String]? = nil
     ) {
         self.name = name
         self.dataType = dataType
@@ -77,6 +81,7 @@ public struct ColumnInfo: Hashable, Sendable {
         self.extra = extra
         self.collation = collation
         self.generationExpression = generationExpression
+        self.enumValues = enumValues
     }
 }
 

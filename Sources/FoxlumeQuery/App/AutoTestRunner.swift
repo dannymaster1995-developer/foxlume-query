@@ -550,8 +550,33 @@ final class AutoTestRunner {
         guard let window = frontWindow else { return record("  ! no window") }
         let target = window.childWindows?.first(where: \.isVisible) ?? window
         let url = snapshotDirectory.appendingPathComponent(name)
-        guard captureWindow(target.windowNumber, to: url) else { return record("  ! capture failed") }
-        record("  captured \(name)")
+        if captureWindow(target.windowNumber, to: url) {
+            return record("  captured \(name)")
+        }
+        // Without screen capture, draw the window and then the child window over it offscreen.
+        guard let frameView = window.contentView?.superview, let image = Self.offscreenImage(of: frameView) else { return record("  ! capture failed") }
+        let composite = NSImage(size: frameView.bounds.size)
+        composite.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: frameView.bounds.size))
+        if target !== window, let childView = target.contentView, let childImage = Self.offscreenImage(of: childView) {
+            let origin = NSPoint(x: target.frame.minX - window.frame.minX, y: target.frame.minY - window.frame.minY)
+            childImage.draw(in: NSRect(origin: origin, size: childView.bounds.size))
+        }
+        composite.unlockFocus()
+        guard let tiff = composite.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else {
+            return record("  ! capture failed")
+        }
+        try? png.write(to: url)
+        record("  wrote \(name)")
+    }
+
+    private static func offscreenImage(of view: NSView) -> NSImage? {
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let image = NSImage(size: view.bounds.size)
+        image.addRepresentation(rep)
+        return image
     }
 
     private func captureWindow(_ windowNumber: Int, to url: URL) -> Bool {

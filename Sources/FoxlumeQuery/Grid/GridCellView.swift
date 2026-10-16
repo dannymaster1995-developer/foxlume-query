@@ -36,6 +36,25 @@ final class GridCellView: NSTableCellView {
     private var fieldToEdge: NSLayoutConstraint?
     private var fieldToButton: NSLayoutConstraint?
     var onFollowReference: (() -> Void)?
+    /// Check box drawn before the text of boolean cells; clicks on it are handled by the grid.
+    private lazy var toggleView: NSImageView = {
+        let view = NSImageView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.imageScaling = .scaleProportionallyDown
+        view.isHidden = true
+        view.setAccessibilityIdentifier("booleanToggle")
+        return view
+    }()
+    private var fieldToLeadingEdge: NSLayoutConstraint?
+    private var fieldToToggle: NSLayoutConstraint?
+    private var toggle: Toggle?
+
+    /// The state a boolean cell's check box shows; NULL gets a dash.
+    enum Toggle {
+        case on
+        case off
+        case null
+    }
     /// Find-bar highlight: every match is tinted, the current one more strongly.
     private var findHighlight: FindHighlight = .none
 
@@ -82,11 +101,18 @@ final class GridCellView: NSTableCellView {
         field.focusRingType = .none
         addSubview(field)
         addSubview(referenceButton)
+        addSubview(toggleView)
         textField = field
         fieldToEdge = field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5)
         fieldToButton = field.trailingAnchor.constraint(equalTo: referenceButton.leadingAnchor, constant: -2)
+        fieldToLeadingEdge = field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5)
+        fieldToToggle = field.leadingAnchor.constraint(equalTo: toggleView.trailingAnchor, constant: 3)
+        fieldToLeadingEdge?.isActive = true
         NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            toggleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            toggleView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            toggleView.widthAnchor.constraint(equalToConstant: 14),
+            toggleView.heightAnchor.constraint(equalToConstant: 14),
             field.centerYAnchor.constraint(equalTo: centerYAnchor),
             referenceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             referenceButton.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -123,6 +149,31 @@ final class GridCellView: NSTableCellView {
     /// Whether a point (in this view) is on the visible foreign key arrow, which handles its own clicks.
     func isReferenceButtonHit(at point: NSPoint) -> Bool {
         !referenceButton.isHidden && referenceButton.frame.insetBy(dx: -2, dy: -2).contains(point)
+    }
+
+    /// Shows the check box of a boolean cell, or hides it (nil). Cells are reused, so every configure call sets it.
+    func setToggle(_ toggle: Toggle?) {
+        self.toggle = toggle
+        toggleView.isHidden = toggle == nil
+        fieldToToggle?.isActive = false
+        fieldToLeadingEdge?.isActive = false
+        (toggle == nil ? fieldToLeadingEdge : fieldToToggle)?.isActive = true
+        guard let toggle else { return }
+        let symbol: String
+        switch toggle {
+        case .on: symbol = "checkmark.square.fill"
+        case .off: symbol = "square"
+        case .null: symbol = "minus.square"
+        }
+        toggleView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: toggle == .on ? "true" : (toggle == .off ? "false" : "NULL"))
+        refreshColors()
+    }
+
+    var toggleState: Toggle? { toggle }
+
+    /// Whether a point (in this view) is on the visible check box of a boolean cell.
+    func isToggleHit(at point: NSPoint) -> Bool {
+        !toggleView.isHidden && toggleView.frame.insetBy(dx: -3, dy: -3).contains(point)
     }
 
     @objc private func followReference(_ sender: Any?) {
@@ -180,6 +231,13 @@ final class GridCellView: NSTableCellView {
         case .none: break
         case .match: layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(selected ? 0.45 : 0.28).cgColor
         case .current: layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.7).cgColor
+        }
+        if let toggle {
+            switch toggle {
+            case .on: toggleView.contentTintColor = selected ? .alternateSelectedControlTextColor : .controlAccentColor
+            case .off: toggleView.contentTintColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+            case .null: toggleView.contentTintColor = selected ? .alternateSelectedControlTextColor : Theme.nullText
+            }
         }
         guard let baseFont = field.font else { return }
         switch style {

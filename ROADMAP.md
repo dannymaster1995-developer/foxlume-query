@@ -36,7 +36,7 @@ Data grid:
 - [x] FQ-101 Set Value: DEFAULT and NOW() in the cell menu
 - [x] FQ-102 Copy rows as an IN list or as UPDATE statements
 - [x] FQ-103 Columns: hide and show, jump to column, size to fit, remembered layout
-- [ ] FQ-104 Cell editors: date and time picker, enum list, boolean toggle, foreign key value picker
+- [x] FQ-104 Cell editors: date and time picker, enum list, boolean toggle, foreign key value picker
 - [ ] FQ-105 Value viewers: JSON tree, image preview, hex
 
 Editor and results:

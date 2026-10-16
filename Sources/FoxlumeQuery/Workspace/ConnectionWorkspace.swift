@@ -296,6 +296,11 @@ final class ConnectionWorkspace {
         try await tracked { try await session.fetchRows(query, token: token) }
     }
 
+    /// Rows of a referenced table for the foreign key value picker; not recorded in the history.
+    func referenceCandidates(_ request: ReferenceCandidateRequest) async throws -> [ReferenceCandidate] {
+        try await tracked { try await session.run { try $0.referenceCandidates(request) } }
+    }
+
     func countRows(_ query: TableQuery) async throws -> Int? {
         try await tracked { try await session.countRows(query) }
     }
