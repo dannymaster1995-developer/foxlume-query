@@ -31,10 +31,13 @@ final class SidebarViewController: NSViewController {
     var onShowERDiagram: ((TableRef?) -> Void)?
     /// Rename Schema… for the browsed schema, from the schema picker's context menu or the empty area's.
     var onRenameSchema: ((String) -> Void)?
+    /// The Maintenance submenu's items for the given tables (empty for the empty area); see
+    /// WorkspaceWindowController+Maintenance.swift.
+    var maintenanceItems: (([TableInfo]) -> [NSMenuItem])?
 
     private let filterField = NSSearchField()
     private let schemaPopup = ContextMenuPopUpButton()
-    let outline = NSOutlineView()
+    let outline = SidebarOutlineView()
     private let statusLabel = UI.label("", size: 11, color: .secondaryLabelColor)
     private let spinner = NSProgressIndicator()
 
@@ -107,6 +110,7 @@ final class SidebarViewController: NSViewController {
         outline.style = .sourceList
         outline.rowSizeStyle = .default
         outline.floatsGroupRows = false
+        outline.allowsMultipleSelection = true
         outline.dataSource = self
         outline.delegate = self
         outline.target = self
@@ -179,7 +183,7 @@ final class SidebarViewController: NSViewController {
     }
 
     private func reload() {
-        let selected = selectedTable
+        let selected = selectedTableInfos.map(\.ref)
         schemaPopup.removeAllItems()
         schemaPopup.addItems(withTitles: workspace.schemas)
         if let schema = workspace.currentSchema { schemaPopup.selectItem(withTitle: schema) }
@@ -214,7 +218,7 @@ final class SidebarViewController: NSViewController {
             if opens { outline.expandItem(group) }
         }
         isRestoringExpansion = false
-        if let selected { select(selected) }
+        if !selected.isEmpty { select(selected) }
         if let selectedObject { select(selectedObject) }
 
         if workspace.isLoadingTables {
@@ -242,12 +246,25 @@ final class SidebarViewController: NSViewController {
         (outline.item(atRow: outline.selectedRow) as? TableInfoBox)?.info.ref
     }
 
+    /// The tables and views selected in the list (Shift-click or Shift-arrow selects several), in list order.
+    var selectedTableInfos: [TableInfo] {
+        outline.selectedRowIndexes.compactMap { (outline.item(atRow: $0) as? TableInfoBox)?.info }.filter { $0.kind != .keyspace }
+    }
+
     func select(_ table: TableRef) {
+        select([table])
+    }
+
+    /// Selects every listed table of `tables`, replacing the selection.
+    func select(_ tables: [TableRef]) {
+        var rows = IndexSet()
         for group in groups {
-            guard let index = group.items.firstIndex(where: { $0.ref == table }) else { continue }
-            let row = outline.row(forItem: box(for: group.items[index]))
-            if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+            for info in group.items where tables.contains(info.ref) {
+                let row = outline.row(forItem: box(for: info))
+                if row >= 0 { rows.insert(row) }
+            }
         }
+        if !rows.isEmpty { outline.selectRowIndexes(rows, byExtendingSelection: false) }
     }
 
     // NSOutlineView needs stable object identity per item.
@@ -278,6 +295,8 @@ final class SidebarViewController: NSViewController {
         }
         // Opening an object's source is a round trip, so a single click only selects it, as in TablePro.
         guard let info = (item as? TableInfoBox)?.info else { return }
+        // Shift-click extends the selection (for Maintenance) without opening anything.
+        if NSApp.currentEvent?.modifierFlags.contains(.shift) == true || outline.selectedRowIndexes.count > 1 { return }
         onOpenTable?(info.ref, newTab)
     }
 
@@ -343,6 +362,31 @@ final class SidebarViewController: NSViewController {
     }
 
     fileprivate var menuTarget: TableRef? { menuTargetInfo?.ref }
+
+    /// What the context menu's Maintenance acts on: the selection when the clicked row is part of it, else the
+    /// clicked row alone, as in Finder.
+    fileprivate var maintenanceTargetInfos: [TableInfo] {
+        let row = outline.clickedRow
+        if row >= 0, !outline.selectedRowIndexes.contains(row) { return menuTargetInfo.map { [$0] } ?? [] }
+        let selected = selectedTableInfos
+        return selected.isEmpty ? (menuTargetInfo.map { [$0] } ?? []) : selected
+    }
+
+    /// The context menu's Maintenance submenu for the selection (or the empty area), as "Title" lines; nil when the
+    /// menu has none. For scripted checks.
+    func maintenanceMenuTitles(background: Bool) -> [String]? {
+        guard let items = maintenanceItems?(background ? [] : maintenanceTargetInfos), !items.isEmpty else { return nil }
+        return items.map { $0.isSeparatorItem ? "-" : $0.title }
+    }
+
+    private func addMaintenanceMenu(for tables: [TableInfo], to menu: NSMenu) {
+        guard let items = maintenanceItems?(tables), !items.isEmpty else { return }
+        let submenu = NSMenu(title: "Maintenance")
+        items.forEach(submenu.addItem)
+        let item = NSMenuItem(title: "Maintenance", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        menu.addItem(item)
+    }
 
     /// The context menu for the selected row, as "Title" or "✓ Title", for scripted checks.
     func menuTitlesForSelection() -> [String] {
@@ -719,6 +763,9 @@ extension SidebarViewController: NSMenuDelegate {
                 }
                 menu.addItem(.separator())
             }
+            let maintenanceCount = menu.items.count
+            addMaintenanceMenu(for: maintenanceTargetInfos, to: menu)
+            if menu.items.count > maintenanceCount { menu.addItem(.separator()) }
             if let info = menuTargetInfo, !workspace.isReadOnly {
                 let operations = workspace.tableOperations
                 let pending = workspace.pendingOperation(for: info.ref)?.operation
@@ -759,6 +806,9 @@ extension SidebarViewController: NSMenuDelegate {
         if menuTarget == nil, renamableSchema != nil {
             menu.addItem(item("Rename Schema…", #selector(menuRenameSchema(_:))))
         }
+        if menuTarget == nil {
+            addMaintenanceMenu(for: [], to: menu)
+        }
         menu.addItem(item("Refresh", #selector(menuRefresh(_:))))
     }
 }
@@ -781,5 +831,20 @@ final class ContextMenuPopUpButton: NSPopUpButton {
             return NSMenu.popUpContextMenu(menu, with: event, for: self)
         }
         super.mouseDown(with: event)
+    }
+}
+
+/// The sidebar list. Shift-click and Shift-arrow select several rows; ⌘-click keeps opening a table in a new tab
+/// instead of toggling it in the selection.
+final class SidebarOutlineView: NSOutlineView {
+    override func mouseDown(with event: NSEvent) {
+        let flags = event.modifierFlags
+        guard flags.contains(.command), !flags.contains(.shift),
+              let plain = NSEvent.mouseEvent(
+                with: event.type, location: event.locationInWindow, modifierFlags: flags.subtracting(.command),
+                timestamp: event.timestamp, windowNumber: event.windowNumber, context: nil,
+                eventNumber: event.eventNumber, clickCount: event.clickCount, pressure: event.pressure)
+        else { return super.mouseDown(with: event) }
+        super.mouseDown(with: plain)
     }
 }

@@ -27,15 +27,18 @@ public struct TableInfo: Hashable, Sendable, Identifiable {
     /// Approximate row count from catalog statistics, when cheap to get.
     public var estimatedRows: Int?
     public var comment: String?
+    /// Storage engine (MySQL, MariaDB: `InnoDB`, `MyISAM`, `Aria`…), nil elsewhere. Decides whether Repair Table is offered.
+    public var engine: String?
 
     public var id: TableRef { ref }
     public var name: String { ref.name }
 
-    public init(ref: TableRef, kind: TableKind = .table, estimatedRows: Int? = nil, comment: String? = nil) {
+    public init(ref: TableRef, kind: TableKind = .table, estimatedRows: Int? = nil, comment: String? = nil, engine: String? = nil) {
         self.ref = ref
         self.kind = kind
         self.estimatedRows = estimatedRows
         self.comment = comment
+        self.engine = engine
     }
 }
 

@@ -13,7 +13,7 @@ extension MySQLConnection {
 
     public func tables(schema: String?) throws -> [TableInfo] {
         let rows = try rows("""
-            SELECT TABLE_NAME, TABLE_TYPE, TABLE_ROWS, TABLE_COMMENT
+            SELECT TABLE_NAME, TABLE_TYPE, TABLE_ROWS, TABLE_COMMENT, ENGINE
             FROM information_schema.TABLES
             WHERE TABLE_SCHEMA = \(databaseExpression(schema))
             """)
@@ -32,7 +32,8 @@ extension MySQLConnection {
                 ref: TableRef(schema: tableSchema, name: name),
                 kind: kind,
                 estimatedRows: Self.cell(row, 2).flatMap { Int($0) },
-                comment: comment
+                comment: comment,
+                engine: Self.cell(row, 4)
             )
         }
         return tables.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

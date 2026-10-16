@@ -111,8 +111,11 @@ final class AutoTestRunner {
             try await performEditor(command, argument)
         case _ where DatabasesAutoTest.commands.contains(command):
             try await performDatabases(command, argument)
+        case _ where MaintenanceAutoTest.commands.contains(command):
+            try await performMaintenance(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
+            MaintenanceController.presented?.dismiss()
             for window in NSApp.windows {
                 if let sheet = window.attachedSheet { window.endSheet(sheet) }
             }

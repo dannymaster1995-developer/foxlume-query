@@ -86,6 +86,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         sidebar.onNewTable = { [weak self] in self?.newTable(nil) }
         sidebar.onRenameSchema = { [weak self] schema in self?.presentRenameSchema(schema) }
         sidebar.onViewCommand = { [weak self] command in self?.performViewCommand(command) }
+        sidebar.maintenanceItems = { [weak self] tables in self?.maintenanceItems(for: tables, hidingRefused: true) ?? [] }
         tabs.onViewSaved = { [weak self] view in self?.selectSavedView(view) }
         sidebar.onOpenObject = { [weak self] object in self?.openObjectSource(object) }
         sidebar.onObjectCommand = { [weak self] command in self?.performObjectCommand(command) }
@@ -527,6 +528,7 @@ extension WorkspaceWindowController: NSMenuItemValidation {
         if let transfer = validateTransferItem(menuItem.action) { return transfer }
         if let saved = validateSavedQueriesItem(menuItem.action) { return saved }
         if let diagram = validateDiagramItem(menuItem.action) { return diagram }
+        if let maintenance = validateMaintenanceItem(menuItem) { return maintenance }
         let hasOperations = !workspace.pendingTableOperations.isEmpty
         switch menuItem.action {
         case #selector(saveAll(_:)):

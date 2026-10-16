@@ -65,6 +65,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **A structure editor** for PostgreSQL and MySQL: add or change columns, indexes, foreign keys and comments, drag columns into a new order, review the generated `ALTER` statements, then save. MySQL moves columns in place; PostgreSQL rebuilds the table in one transaction when nothing depends on it. **New Table** builds a `CREATE TABLE` with a live preview.
 - **Functions, procedures, triggers and types** in the sidebar, with their source and "Edit in Query Tab".
 - **Rename and copy** on PostgreSQL: Rename Schema, Rename Database and Copy Database. Open tables, column layouts, ER layouts and filter presets follow the new name, and if someone else is connected to the database you are renaming or copying, Foxlume Query tells you who instead of failing halfway.
+- **Maintenance** from the sidebar (Shift-click to select several tables) or Database › Maintenance: Vacuum, Vacuum Analyze, Analyze, Vacuum Full and Reindex on PostgreSQL; Optimize, Analyze, Check and (MyISAM and Aria) Repair Table on MySQL and MariaDB; Analyze, Integrity Check and Vacuum on SQLite; Analyze and Checkpoint on DuckDB. Commands run one table at a time on a separate connection, so the rest of the app keeps working, and the server's answer, status and time of each table show as they finish, with Cancel.
 - **Views** for PostgreSQL, MySQL, MariaDB, SQLite and DuckDB: **New View** opens a `CREATE VIEW` template, **Edit View** opens the current definition ready to replace, and **Save View** runs it and selects the view in the sidebar. PostgreSQL materialized views can be edited and refreshed too.
 
 ### Import and export
@@ -95,6 +96,10 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 | Statement under the cursor | Word wrap off |
 |---|---|
 | <img src="docs/images/current-statement.png" alt="The query editor shading the statement under the cursor in a script of three statements" width="420"> | <img src="docs/images/word-wrap-off.png" alt="The query editor with word wrap off, a long statement running past the right edge with a horizontal scroller" width="420"> |
+
+| Maintenance |
+|---|
+| <img src="docs/images/maintenance.png" alt="Optimize Table results for two MySQL tables, with the server's messages, status and time per table" width="420"> |
 
 </details>
 

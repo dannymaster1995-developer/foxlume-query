@@ -151,6 +151,8 @@ enum MainMenu {
             item("Go to Page…", #selector(FoxlumeQueryActions.showGoToPage(_:))),
             item("Refresh", #selector(FoxlumeQueryActions.refreshData(_:)), "r"),
         ]))
+        let maintenance = submenu("Maintenance", [])
+        maintenance.submenu?.delegate = MaintenanceMenuDelegate.shared
         main.addItem(submenu("Database", [
             item("Switch Database…", #selector(FoxlumeQueryActions.showDatabaseSwitcher(_:)), "k"),
             item("Refresh Table List", #selector(FoxlumeQueryActions.refreshMetadata(_:)), "r", [.command, .shift]),
@@ -166,6 +168,7 @@ enum MainMenu {
             item("Drop Schema…", #selector(FoxlumeQueryActions.dropSchema(_:))),
             .separator(),
             item("ER Diagram", #selector(FoxlumeQueryActions.showERDiagram(_:))),
+            maintenance,
             .separator(),
             item("Disconnect", #selector(FoxlumeQueryActions.disconnect(_:))),
             item("Reconnect", #selector(FoxlumeQueryActions.reconnect(_:))),
