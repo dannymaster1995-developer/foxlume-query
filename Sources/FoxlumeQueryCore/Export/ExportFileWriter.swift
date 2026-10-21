@@ -41,6 +41,12 @@ final class ExportFileWriter {
         if buffer.count >= bufferLimit { try flush() }
     }
 
+    func write(_ data: Data) throws {
+        buffer.append(data)
+        bytesWritten += Int64(data.count)
+        if buffer.count >= bufferLimit { try flush() }
+    }
+
     private func flush() throws {
         guard !buffer.isEmpty else { return }
         let bytes = buffer
@@ -78,22 +84,13 @@ final class ExportFileWriter {
 
 /// Streaming gzip (RFC 1952) built on the system DEFLATE encoder, which produces raw RFC 1951 data.
 final class GzipEncoder {
-    private var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 1)!, dst_size: 0, src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!, src_size: 0, state: nil)
+    private let deflater: DeflateEncoder
     private var crc: UInt32 = 0
     private var size: UInt32 = 0
     private var wroteHeader = false
-    private let output = UnsafeMutablePointer<UInt8>.allocate(capacity: 1 << 16)
-    private let outputSize = 1 << 16
 
     init() throws {
-        guard compression_stream_init(&stream, COMPRESSION_STREAM_ENCODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
-            throw DatabaseError.unsupported("Could not start gzip compression.")
-        }
-    }
-
-    deinit {
-        compression_stream_destroy(&stream)
-        output.deallocate()
+        deflater = try DeflateEncoder()
     }
 
     func encode(_ data: Data, final: Bool) throws -> Data {
@@ -105,6 +102,41 @@ final class GzipEncoder {
         }
         crc = CRC32.update(crc, data)
         size = size &+ UInt32(truncatingIfNeeded: data.count)
+        do {
+            result.append(try deflater.encode(data, final: final))
+        } catch {
+            throw DatabaseError.unsupported("gzip compression failed.")
+        }
+        if final {
+            for value in [crc, size] {
+                result.append(contentsOf: [UInt8(value & 0xFF), UInt8(value >> 8 & 0xFF), UInt8(value >> 16 & 0xFF), UInt8(value >> 24 & 0xFF)])
+            }
+        }
+        return result
+    }
+}
+
+/// Streaming raw DEFLATE (RFC 1951) on the system encoder, for gzip files and ZIP entries.
+final class DeflateEncoder {
+    private var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 1)!, dst_size: 0, src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!, src_size: 0, state: nil)
+    private let output = UnsafeMutablePointer<UInt8>.allocate(capacity: 1 << 16)
+    private let outputSize = 1 << 16
+
+    init() throws {
+        guard compression_stream_init(&stream, COMPRESSION_STREAM_ENCODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
+            output.deallocate()
+            throw DatabaseError.unsupported("Could not start DEFLATE compression.")
+        }
+    }
+
+    deinit {
+        compression_stream_destroy(&stream)
+        output.deallocate()
+    }
+
+    /// Compresses `data`. `final` ends the stream; the encoder cannot be used afterwards.
+    func encode(_ data: Data, final: Bool) throws -> Data {
+        var result = Data()
         try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             let base = raw.bindMemory(to: UInt8.self).baseAddress
             stream.src_ptr = base ?? UnsafePointer<UInt8>(bitPattern: 1)!
@@ -122,20 +154,15 @@ final class GzipEncoder {
                 case COMPRESSION_STATUS_END:
                     return
                 default:
-                    throw DatabaseError.unsupported("gzip compression failed.")
+                    throw DatabaseError.unsupported("DEFLATE compression failed.")
                 }
-            }
-        }
-        if final {
-            for value in [crc, size] {
-                result.append(contentsOf: [UInt8(value & 0xFF), UInt8(value >> 8 & 0xFF), UInt8(value >> 16 & 0xFF), UInt8(value >> 24 & 0xFF)])
             }
         }
         return result
     }
 }
 
-/// CRC-32 (IEEE 802.3), as gzip needs it.
+/// CRC-32 (IEEE 802.3), as gzip and ZIP need it.
 enum CRC32 {
     private static let table: [UInt32] = (0..<256).map { index in
         var value = UInt32(index)
@@ -146,9 +173,16 @@ enum CRC32 {
     }
 
     static func update(_ crc: UInt32, _ data: Data) -> UInt32 {
+        data.withUnsafeBytes { update(crc, $0) }
+    }
+
+    static func update(_ crc: UInt32, _ bytes: UnsafeRawBufferPointer) -> UInt32 {
         var value = ~crc
-        for byte in data {
-            value = table[Int((value ^ UInt32(byte)) & 0xFF)] ^ (value >> 8)
+        // Unsafe buffers keep this fast in debug builds too, where the tests run.
+        table.withUnsafeBufferPointer { table in
+            for byte in bytes {
+                value = table[Int((value ^ UInt32(byte)) & 0xFF)] ^ (value >> 8)
+            }
         }
         return ~value
     }

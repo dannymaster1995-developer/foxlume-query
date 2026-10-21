@@ -70,7 +70,7 @@ struct PostgresTransferLiveTests {
     }
 
     func dropScratch(_ connection: PostgresConnection) {
-        _ = try? connection.execute("DROP TABLE IF EXISTS fq_io_pg_src, fq_io_pg_csv, fq_io_pg_strict, fq_io_pg_empty, fq_io_pg_log CASCADE", rowLimit: nil)
+        _ = try? connection.execute("DROP TABLE IF EXISTS fq_io_pg_src, fq_io_pg_csv, fq_io_pg_strict, fq_io_pg_empty, fq_io_pg_log, fq_io_pg_sheet, fq_io_pg_nested CASCADE", rowLimit: nil)
     }
 
     @Test(arguments: [false, true])
@@ -162,6 +162,72 @@ struct PostgresTransferLiveTests {
         #expect(report.failure == nil, "\(String(describing: report.failure))")
         #expect(report.rowsImported == 1504)
         #expect(try TransferRoundTrip.rows(connection, "fq_io_pg_csv") == TransferRoundTrip.rows(connection, Self.source))
+    }
+
+    @Test func xlsxRoundTrip() throws {
+        let connection = try PostgresTestServer.connect()
+        defer { dropScratch(connection); connection.close() }
+        try makeSource(connection)
+        _ = try connection.execute("CREATE TABLE fq_io_pg_sheet (LIKE \(Self.source) INCLUDING ALL)", rowLimit: nil)
+        let folder = try TransferFiles.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("src.xlsx")
+        var options = TableExportOptions()
+        options.format = .xlsx
+        options.fetchSize = 64
+        let report = try TransferRoundTrip.export(connection, [TableExportItem(table: TableRef(schema: "public", name: Self.source))], options: options, to: .file(file))
+        #expect(report.warnings.isEmpty)
+        let preview = try XLSXWorkbook.preview(url: file, sheet: nil, limit: 2)
+        // Typed cells: the boolean and the date come back as such, the 64-bit number as its exact text.
+        #expect(SpreadsheetTestTools.texts(preview.records[1]).prefix(9) == ["1", "7", "9007199254740993", "1.5", "3.141592653589793", "1234.5678", "true", "2026-10-13", "2026-10-13 08:30:00.125"])
+
+        var importOptions = CSVImportOptions()
+        importOptions.rowsPerInsert = 100
+        let imported = try SpreadsheetTestTools.importXLSX(connection, file: file, into: TableRef(schema: "public", name: "fq_io_pg_sheet"), options: importOptions)
+        #expect(imported.failure == nil, "\(String(describing: imported.failure))")
+        #expect(imported.rowsImported == 1504)
+        // Includes now() with microseconds in a timestamptz column.
+        #expect(try TransferRoundTrip.rows(connection, "fq_io_pg_sheet") == TransferRoundTrip.rows(connection, Self.source))
+    }
+
+    @Test(arguments: [TableExportFormat.json, .ndjson])
+    func jsonImportRoundTrip(format: TableExportFormat) throws {
+        let connection = try PostgresTestServer.connect()
+        defer { dropScratch(connection); connection.close() }
+        try makeSource(connection, bulkRows: 300)
+        _ = try connection.execute("CREATE TABLE fq_io_pg_sheet (LIKE \(Self.source) INCLUDING ALL)", rowLimit: nil)
+        let folder = try TransferFiles.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("src." + format.fileExtension)
+        var options = TableExportOptions()
+        options.format = format
+        options.jsonIncludeNulls = format == .json
+        _ = try TransferRoundTrip.export(connection, [TableExportItem(table: TableRef(schema: "public", name: Self.source))], options: options, to: .file(file))
+        let imported = try SpreadsheetTestTools.importJSON(connection, file: file, into: TableRef(schema: "public", name: "fq_io_pg_sheet"))
+        #expect(imported.failure == nil, "\(String(describing: imported.failure))")
+        #expect(imported.rowsImported == 304)
+        #expect(try TransferRoundTrip.rows(connection, "fq_io_pg_sheet") == TransferRoundTrip.rows(connection, Self.source))
+    }
+
+    @Test func nestedJSONGoesIntoJSONAndTextColumns() throws {
+        let connection = try PostgresTestServer.connect()
+        defer { dropScratch(connection); connection.close() }
+        _ = try connection.execute("CREATE TABLE fq_io_pg_nested (id int PRIMARY KEY, doc jsonb, raw json, note text, qty int NOT NULL DEFAULT 0)", rowLimit: nil)
+        let file = try TransferFiles.write("""
+            {"id": 1, "doc": {"a": [1, 2, {"b": null}], "s": "x y"}, "raw": [true, "q\\"uote"], "note": {"k": 1}, "qty": 5}
+            {"id": 2, "doc": null, "note": "plain", "qty": 6}
+            {"id": 3, "qty": "not a number"}
+            """, name: "fq-nested-\(UUID().uuidString).ndjson")
+        defer { try? FileManager.default.removeItem(at: file) }
+        var options = CSVImportOptions()
+        options.errorPolicy = .skipAndContinue
+        let report = try SpreadsheetTestTools.importJSON(connection, file: file, into: TableRef(schema: "public", name: "fq_io_pg_nested"), options: options)
+        #expect(report.rowsImported == 2)
+        #expect(report.issues.map(\.line) == [3])
+        #expect(try TransferRoundTrip.rows(connection, "fq_io_pg_nested") == [
+            [.text("1"), .text("{\"a\": [1, 2, {\"b\": null}], \"s\": \"x y\"}"), .text("[true,\"q\\\"uote\"]"), .text("{\"k\":1}"), .text("5")],
+            [.text("2"), .null, .null, .text("plain"), .text("6")],
+        ])
     }
 
     @Test func jsonAndNDJSONValues() throws {
@@ -392,7 +458,7 @@ struct MySQLTransferLiveTests {
     }
 
     func dropScratch(_ connection: MySQLConnection) {
-        _ = try? connection.execute("DROP TABLE IF EXISTS fq_io_my_src, fq_io_my_csv, fq_io_my_strict, fq_io_my_comp, fq_io_my_empty, fq_io_my_log", rowLimit: nil)
+        _ = try? connection.execute("DROP TABLE IF EXISTS fq_io_my_src, fq_io_my_csv, fq_io_my_strict, fq_io_my_comp, fq_io_my_empty, fq_io_my_log, fq_io_my_sheet", rowLimit: nil)
     }
 
     @Test(arguments: [false, true])
@@ -442,6 +508,44 @@ struct MySQLTransferLiveTests {
         #expect(report.failure == nil, "\(String(describing: report.failure))")
         #expect(report.rowsImported == 1504)
         #expect(try TransferRoundTrip.rows(connection, "fq_io_my_csv") == TransferRoundTrip.rows(connection, Self.source))
+    }
+
+    @Test func xlsxRoundTrip() throws {
+        let connection = try MySQLTestServer.connect()
+        defer { dropScratch(connection); connection.close() }
+        try makeSource(connection)
+        _ = try connection.execute("CREATE TABLE fq_io_my_sheet LIKE \(Self.source)", rowLimit: nil)
+        let folder = try TransferFiles.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("src.xlsx")
+        var options = TableExportOptions()
+        options.format = .xlsx
+        options.fetchSize = 64
+        _ = try TransferRoundTrip.export(connection, [TableExportItem(table: TableRef(name: Self.source))], options: options, to: .file(file))
+        let imported = try SpreadsheetTestTools.importXLSX(connection, file: file, into: TableRef(name: "fq_io_my_sheet"))
+        #expect(imported.failure == nil, "\(String(describing: imported.failure))")
+        #expect(imported.rowsImported == 1504)
+        #expect(try TransferRoundTrip.rows(connection, "fq_io_my_sheet") == TransferRoundTrip.rows(connection, Self.source))
+    }
+
+    @Test(arguments: [TableExportFormat.json, .ndjson])
+    func jsonImportRoundTrip(format: TableExportFormat) throws {
+        let connection = try MySQLTestServer.connect()
+        defer { dropScratch(connection); connection.close() }
+        try makeSource(connection, bulkRows: 300)
+        _ = try connection.execute("CREATE TABLE fq_io_my_sheet LIKE \(Self.source)", rowLimit: nil)
+        let folder = try TransferFiles.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("src." + format.fileExtension)
+        var options = TableExportOptions()
+        options.format = format
+        _ = try TransferRoundTrip.export(connection, [TableExportItem(table: TableRef(name: Self.source))], options: options, to: .file(file))
+        var importOptions = CSVImportOptions()
+        importOptions.errorPolicy = .stopAndKeep
+        let imported = try SpreadsheetTestTools.importJSON(connection, file: file, into: TableRef(name: "fq_io_my_sheet"), options: importOptions)
+        #expect(imported.failure == nil, "\(String(describing: imported.failure))")
+        #expect(imported.rowsImported == 304)
+        #expect(try TransferRoundTrip.rows(connection, "fq_io_my_sheet") == TransferRoundTrip.rows(connection, Self.source))
     }
 
     @Test func compositeKeyPagesCoverEveryRow() throws {
@@ -567,5 +671,46 @@ struct MySQLTransferLiveTests {
         #expect(report.statementsRun == 3)
         #expect(try TransferRoundTrip.scalar(connection, "SELECT @@FOREIGN_KEY_CHECKS") == "1")
         #expect(try TransferRoundTrip.rows(connection, "fq_io_my_log") == [[.text("1"), .text("back\\slash; semi")]])
+    }
+}
+
+/// The whole of perf_big (two million rows) to one workbook: past Excel's row limit, so it continues on a
+/// second sheet, with memory staying flat while the rows stream.
+@Suite("XLSX export of perf_big", .serialized, .enabled(if: PostgresTestServer.isAvailable, "needs the PostgreSQL test server"))
+struct XLSXPerfLiveTests {
+    static func residentBytes() -> UInt64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count) }
+        }
+        return result == KERN_SUCCESS ? info.resident_size : 0
+    }
+
+    @Test func perfBigStreamsToTwoSheets() throws {
+        let connection = try PostgresTestServer.connect()
+        defer { connection.close() }
+        let folder = try TransferFiles.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("perf_big.xlsx")
+        var options = TableExportOptions()
+        options.format = .xlsx
+        options.fetchSize = 5000
+        let before = Self.residentBytes()
+        var peak = before
+        let started = Date()
+        let report = try TransferRoundTrip.export(connection, [TableExportItem(table: TableRef(schema: "public", name: "perf_big"))], options: options, to: .file(file)) { progress in
+            if progress.tableRows % 100_000 < 5000 { peak = max(peak, Self.residentBytes()) }
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(report.totalRows == 2_000_000)
+        #expect(elapsed < 600, "took \(Int(elapsed)) s")
+        // The sheet XML alone is hundreds of megabytes; streaming keeps the growth small.
+        #expect(peak - before < 200 << 20, "grew by \((peak - before) >> 20) MB")
+        #expect(report.warnings.contains { $0.contains("continues on 1 more sheet") })
+        let workbook = try XLSXWorkbook(url: file)
+        #expect(workbook.sheetNames == ["perf_big", "perf_big (2)"])
+        let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
+        print("perf_big.xlsx: \(size >> 20) MB in \(Int(elapsed)) s, resident memory grew by \((peak - before) >> 20) MB")
     }
 }

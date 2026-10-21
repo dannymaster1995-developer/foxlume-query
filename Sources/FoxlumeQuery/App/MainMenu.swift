@@ -107,7 +107,7 @@ enum MainMenu {
             .separator(),
             item("Export Results…", #selector(FoxlumeQueryActions.exportResults(_:)), "e", [.command, .shift]),
             item("Export Tables…", #selector(FoxlumeQueryActions.exportTables(_:)), "e", [.command, .option, .shift]),
-            item("Import CSV into Table…", #selector(FoxlumeQueryActions.importCSV(_:)), "i", [.command, .shift]),
+            item("Import Data into Table…", #selector(FoxlumeQueryActions.importCSV(_:)), "i", [.command, .shift]),
             item("Run SQL File…", #selector(FoxlumeQueryActions.runSQLFile(_:))),
         ]))
         main.addItem(submenu("Edit", [

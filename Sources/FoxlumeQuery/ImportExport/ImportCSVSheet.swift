@@ -3,9 +3,38 @@ import FoxlumeQueryCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// State of the Import CSV sheet: file, target table, preview, mapping, options and the running import.
+/// State of the import sheet (CSV, JSON or XLSX): file, target table, preview, mapping, options and the
+/// running import.
 @MainActor
 final class ImportCSVModel: ObservableObject {
+    /// What kind of file is imported; each has its own reader, the mapping and options are shared.
+    enum FileKind: Equatable {
+        case csv
+        case json
+        case xlsx
+
+        var title: String {
+            switch self {
+            case .csv: return "CSV"
+            case .json: return "JSON"
+            case .xlsx: return "Excel"
+            }
+        }
+
+        /// By extension; a ZIP signature also means a workbook.
+        static func of(_ url: URL) -> FileKind {
+            switch url.pathExtension.lowercased() {
+            case "json", "ndjson", "jsonl": return .json
+            case "xlsx", "xlsm": return .xlsx
+            default:
+                let handle = try? FileHandle(forReadingFrom: url)
+                defer { try? handle?.close() }
+                let start = (try? handle?.read(upToCount: 4)) ?? nil
+                return start == Data([0x50, 0x4B, 0x03, 0x04]) ? .xlsx : .csv
+            }
+        }
+    }
+
     struct Source: Identifiable, Equatable {
         let index: Int
         var name: String
@@ -34,6 +63,12 @@ final class ImportCSVModel: ObservableObject {
     let workspace: ConnectionWorkspace
     @Published var fileURL: URL?
     @Published var fileSize: Int64 = 0
+    @Published private(set) var kind: FileKind = .csv
+    /// JSON: the keys found at the start of the file, which are the source fields.
+    @Published private(set) var jsonKeys: [String] = []
+    /// XLSX: the workbook's sheets and the one to import.
+    @Published private(set) var sheetNames: [String] = []
+    @Published var sheet: String?
     @Published var table: TableRef?
     @Published var options: CSVImportOptions
     @Published private(set) var previewRecords: [[String]] = []
@@ -78,15 +113,21 @@ final class ImportCSVModel: ObservableObject {
     }
 
     var mappingProblem: String? {
-        guard fileURL != nil else { return "Choose a CSV file." }
+        guard fileURL != nil else { return "Choose a CSV, JSON or Excel file." }
         guard table != nil else { return "Choose the table to import into." }
         if let previewError { return previewError }
         return CSVImportMapping.problem(with: mapping, columns: columns)
     }
 
+    /// JSON has no header row: the keys name the fields.
+    var usesHeaderRow: Bool { kind != .json && options.hasHeaderRow }
+
     var rowsInPreview: [[String]] {
-        options.hasHeaderRow ? Array(previewRecords.dropFirst()) : previewRecords
+        usesHeaderRow ? Array(previewRecords.dropFirst()) : previewRecords
     }
+
+    /// "Line" for text files, "Row" for spreadsheets, in messages about bad records.
+    var lineWord: String { kind == .xlsx ? "Row" : "Line" }
 
     // MARK: File and table
 
@@ -98,9 +139,19 @@ final class ImportCSVModel: ObservableObject {
 
     func setFile(_ url: URL) {
         fileURL = url
+        kind = FileKind.of(url)
+        sheet = nil
+        sheetNames = []
+        jsonKeys = []
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         fileSize = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
         phase = .editing
+        reloadPreview()
+    }
+
+    func setSheet(_ name: String) {
+        guard name != sheet else { return }
+        sheet = name
         reloadPreview()
     }
 
@@ -119,7 +170,7 @@ final class ImportCSVModel: ObservableObject {
                 let structure = try await workspace.structure(of: table)
                 guard self.table == table else { return }
                 columns = structure.columns
-                autoMap(byName: options.hasHeaderRow)
+                autoMap(byName: usesHeaderRow || kind == .json)
             } catch {
                 message = "Could not read the columns of \(table.name): \(error.localizedDescription)"
             }
@@ -132,32 +183,76 @@ final class ImportCSVModel: ObservableObject {
         let delimiter = options.delimiter
         let encoding = options.encoding
         let limit = Self.previewLimit + 1
+        let kind = self.kind
+        let sheet = self.sheet
         previewTask?.cancel()
         previewTask = Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try CSVReader.preview(url: url, delimiter: delimiter, encoding: encoding, limit: limit) }
-            }.value
-            guard !Task.isCancelled else { return }
-            switch result {
-            case .success(let preview):
-                previewRecords = preview.records.map(\.texts)
-                detectedDelimiter = preview.delimiter
-                detectedEncoding = preview.encoding
-                previewError = preview.records.isEmpty ? "The file has no rows." : nil
-            case .failure(let error):
-                previewRecords = []
-                previewError = error.localizedDescription
+            switch kind {
+            case .csv:
+                let result = await Task.detached(priority: .userInitiated) {
+                    Result { try CSVReader.preview(url: url, delimiter: delimiter, encoding: encoding, limit: limit) }
+                }.value
+                guard !Task.isCancelled else { return }
+                switch result {
+                case .success(let preview):
+                    showPreview(preview.records)
+                    detectedDelimiter = preview.delimiter
+                    detectedEncoding = preview.encoding
+                case .failure(let error):
+                    showPreview(error: error)
+                }
+            case .json:
+                let result = await Task.detached(priority: .userInitiated) {
+                    Result { try JSONImportReader.preview(url: url, limit: limit) }
+                }.value
+                guard !Task.isCancelled else { return }
+                switch result {
+                case .success(let preview):
+                    jsonKeys = preview.keys
+                    showPreview(preview.records)
+                case .failure(let error):
+                    jsonKeys = []
+                    showPreview(error: error)
+                }
+            case .xlsx:
+                let result = await Task.detached(priority: .userInitiated) {
+                    Result { try XLSXWorkbook.preview(url: url, sheet: sheet, limit: limit) }
+                }.value
+                guard !Task.isCancelled else { return }
+                switch result {
+                case .success(let preview):
+                    sheetNames = preview.sheets
+                    self.sheet = preview.sheet
+                    showPreview(preview.records)
+                case .failure(let error):
+                    showPreview(error: error)
+                }
             }
             rebuildSources()
         }
     }
 
+    private func showPreview(_ records: [CSVRecord]) {
+        previewRecords = records.map { $0.fields.map { $0.isNull ? "" : $0.text } }
+        previewError = records.isEmpty && (kind != .json || jsonKeys.isEmpty) ? "The file has no rows." : nil
+    }
+
+    private func showPreview(error: Error) {
+        previewRecords = []
+        previewError = error.localizedDescription
+    }
+
     /// Field names and samples from the preview, keeping the chosen columns where the field still exists.
     func rebuildSources() {
         let width = previewRecords.map(\.count).max() ?? 0
-        let names = options.hasHeaderRow
-            ? CSVImportMapping.headerNames((previewRecords.first ?? []) + Array(repeating: "", count: max(0, width - (previewRecords.first?.count ?? 0))))
-            : CSVImportMapping.positionalNames(count: width)
+        let names: [String]
+        if kind == .json {
+            names = CSVImportMapping.headerNames(jsonKeys)
+        } else if usesHeaderRow {
+            names = CSVImportMapping.headerNames((previewRecords.first ?? []) + Array(repeating: "", count: max(0, width - (previewRecords.first?.count ?? 0))))
+        } else {
+            names = CSVImportMapping.positionalNames(count: width)
+        }
         let samples = rowsInPreview
         let previous = Dictionary(uniqueKeysWithValues: sources.map { ($0.name, $0.column) })
         sources = names.enumerated().map { index, name in
@@ -165,7 +260,7 @@ final class ImportCSVModel: ObservableObject {
             return Source(index: index, name: name, sample: sample, column: previous[name] ?? nil)
         }
         if previous.isEmpty || !sources.contains(where: { $0.column != nil }) {
-            autoMap(byName: options.hasHeaderRow)
+            autoMap(byName: usesHeaderRow || kind == .json)
         }
     }
 
@@ -212,6 +307,11 @@ final class ImportCSVModel: ObservableObject {
         guard let url = fileURL, let table else { return }
         let options = self.options
         let mapping = self.mapping
+        let kind = self.kind
+        let keys = jsonKeys
+        let sheet = self.sheet
+        let width = sources.count
+        let lineWord = self.lineWord
         let cancellation = OperationCancellation()
         let throttle = ProgressThrottle()
         self.cancellation = cancellation
@@ -228,16 +328,30 @@ final class ImportCSVModel: ObservableObject {
                 try cancellation.check()
                 let report = try await opened.run { connection in
                     let structure = try connection.structure(of: table)
-                    return try CSVImporter(connection: connection, table: table, structure: structure, mapping: mapping, options: options, cancellation: cancellation)
-                        .run(file: url) { progress in
-                            guard throttle.shouldReport() else { return }
-                            DispatchQueue.main.async { MainActor.assumeIsolated { self.progress = progress } }
+                    let importer = CSVImporter(connection: connection, table: table, structure: structure, mapping: mapping, options: options, cancellation: cancellation)
+                    let report: (CSVImportProgress) -> Void = { progress in
+                        guard throttle.shouldReport() else { return }
+                        DispatchQueue.main.async { MainActor.assumeIsolated { self.progress = progress } }
+                    }
+                    switch kind {
+                    case .csv:
+                        return try importer.run(file: url, progress: report)
+                    case .json:
+                        return try importer.run(reader: JSONImportReader(url: url, keys: keys), skipFirstRecord: false, binaryAsBase64: true, progress: report)
+                    case .xlsx:
+                        let workbook = try XLSXWorkbook(url: url)
+                        guard let chosen = sheet.flatMap(workbook.sheet(named:)) ?? workbook.sheets.first else {
+                            throw DatabaseError.unsupported("The workbook has no sheets.")
                         }
+                        let reader = try workbook.reader(for: chosen, width: width)
+                        defer { reader.close() }
+                        return try importer.run(reader: reader, skipFirstRecord: options.hasHeaderRow, progress: report)
+                    }
                 }
                 var preferences = TransferPreferences.load()
                 preferences.csvImport = options
                 preferences.save()
-                phase = .finished(Self.summary(report, table: table, file: url))
+                phase = .finished(Self.summary(report, table: table, file: url, lineWord: lineWord))
                 workspace.recordTransfer(
                     "-- Imported \(report.rowsImported) rows from \(url.lastPathComponent) into \(workspace.dialect.qualifiedName(table))",
                     duration: Date().timeIntervalSince(started),
@@ -254,7 +368,7 @@ final class ImportCSVModel: ObservableObject {
         }
     }
 
-    static func summary(_ report: CSVImportReport, table: TableRef, file: URL) -> Summary {
+    static func summary(_ report: CSVImportReport, table: TableRef, file: URL, lineWord: String = "Line") -> Summary {
         var issues = report.issues
         if let failure = report.failure { issues.insert(failure, at: 0) }
         let title: String
@@ -263,7 +377,8 @@ final class ImportCSVModel: ObservableObject {
             title = report.rolledBack ? "Import cancelled; nothing was imported" : "Import cancelled after \(report.rowsImported.groupedText) rows"
             detail = ""
         } else if let failure = report.failure {
-            title = report.rolledBack ? "Import failed at line \(failure.line); nothing was imported" : "Import stopped at line \(failure.line) after \(report.rowsImported.groupedText) rows"
+            let place = "\(lineWord.lowercased()) \(failure.line)"
+            title = report.rolledBack ? "Import failed at \(place); nothing was imported" : "Import stopped at \(place) after \(report.rowsImported.groupedText) rows"
             detail = failure.message
         } else {
             title = "Imported \(report.rowsImported.groupedText) \(report.rowsImported == 1 ? "row" : "rows") into \(table.name)"
@@ -284,7 +399,7 @@ final class ImportCSVModel: ObservableObject {
 
     func copyIssues() {
         guard case .finished(let summary) = phase else { return }
-        let text = summary.issues.map { "Line \($0.line): \($0.message)\n  \($0.snippet)" }.joined(separator: "\n")
+        let text = summary.issues.map { "\(lineWord) \($0.line): \($0.message)\n  \($0.snippet)" }.joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
@@ -363,7 +478,7 @@ struct ImportCSVView: View {
                 Button("Stop") { model.cancel() }
                     .keyboardShortcut(.cancelAction)
             case .finished(let summary):
-                TransferResultView(title: summary.title, detail: summary.detail, isClean: summary.isClean, issues: summary.issues)
+                TransferResultView(title: summary.title, detail: summary.detail, isClean: summary.isClean, issues: summary.issues, lineWord: model.lineWord)
                 Spacer()
                 if !summary.issues.isEmpty {
                     Button("Copy Errors") { model.copyIssues() }
@@ -391,6 +506,7 @@ struct TransferResultView: View {
     let detail: String
     let isClean: Bool
     let issues: [ImportIssue]
+    var lineWord = "Line"
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -406,7 +522,7 @@ struct TransferResultView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(issues.prefix(200).enumerated()), id: \.offset) { _, issue in
-                                Text("Line \(issue.line): \(issue.message)")
+                                Text("\(lineWord) \(issue.line): \(issue.message)")
                                     .font(.caption.monospaced())
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -428,7 +544,7 @@ private struct ImportCSVHeader: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Import CSV into Table").font(.headline)
+                Text("Import \(model.kind.title) into Table").font(.headline)
                 if let url = model.fileURL {
                     Text("\(url.lastPathComponent) · \(model.fileSize.byteCountText)")
                         .font(.caption)
@@ -463,7 +579,7 @@ private struct ImportCSVPreview: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.previewRecords.isEmpty {
-            Text(model.fileURL == nil ? "Choose a CSV file to see its first rows." : "Reading…")
+            Text(model.fileURL == nil ? "Choose a CSV, JSON or Excel file to see its first rows." : "Reading…")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -556,20 +672,30 @@ private struct ImportCSVOptions: View {
     var body: some View {
         Form {
             Section("Reading") {
-                Picker("Encoding", selection: Binding(get: { model.options.encoding }, set: { model.options.encoding = $0; model.reloadPreview() })) {
-                    ForEach(ImportTextEncoding.allCases) { encoding in
-                        Text(encoding == .automatic ? "Automatic (\(model.detectedEncoding.title))" : encoding.title).tag(encoding)
+                switch model.kind {
+                case .csv:
+                    Picker("Encoding", selection: Binding(get: { model.options.encoding }, set: { model.options.encoding = $0; model.reloadPreview() })) {
+                        ForEach(ImportTextEncoding.allCases) { encoding in
+                            Text(encoding == .automatic ? "Automatic (\(model.detectedEncoding.title))" : encoding.title).tag(encoding)
+                        }
                     }
+                    Picker("Delimiter", selection: Binding(get: { model.options.delimiter }, set: { model.options.delimiter = $0; model.reloadPreview() })) {
+                        Text("Automatic (\(model.detectedDelimiter.title))").tag(CSVDelimiter?.none)
+                        ForEach(CSVDelimiter.allCases) { Text($0.title).tag(Optional($0)) }
+                    }
+                    headerToggle
+                case .json:
+                    Text("An array of objects, or one object per line (NDJSON). Keys are the fields; nested objects and arrays are imported as JSON text.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .xlsx:
+                    Picker("Sheet", selection: Binding(get: { model.sheet ?? "" }, set: { model.setSheet($0) })) {
+                        ForEach(model.sheetNames, id: \.self) { Text($0).tag($0) }
+                    }
+                    .accessibilityIdentifier("importSheet")
+                    headerToggle
                 }
-                Picker("Delimiter", selection: Binding(get: { model.options.delimiter }, set: { model.options.delimiter = $0; model.reloadPreview() })) {
-                    Text("Automatic (\(model.detectedDelimiter.title))").tag(CSVDelimiter?.none)
-                    ForEach(CSVDelimiter.allCases) { Text($0.title).tag(Optional($0)) }
-                }
-                Toggle("First row has column names", isOn: Binding(get: { model.options.hasHeaderRow }, set: {
-                    model.options.hasHeaderRow = $0
-                    model.rebuildSources()
-                    model.autoMap(byName: $0)
-                }))
             }
             Section("Values") {
                 Toggle("Trim spaces", isOn: $model.options.trimWhitespace)
@@ -588,6 +714,14 @@ private struct ImportCSVOptions: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var headerToggle: some View {
+        Toggle("First row has column names", isOn: Binding(get: { model.options.hasHeaderRow }, set: {
+            model.options.hasHeaderRow = $0
+            model.rebuildSources()
+            model.autoMap(byName: $0)
+        }))
     }
 
     private var policyNote: String {
@@ -611,7 +745,7 @@ final class ImportCSVController: NSObject {
     init(workspace: ConnectionWorkspace, table: TableRef?, file: URL?, parent: NSWindow?, onImported: @escaping (TableRef) -> Void) {
         model = ImportCSVModel(workspace: workspace, table: table, file: file)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 660), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-        window.title = "Import CSV"
+        window.title = "Import Data"
         window.isRestorable = false
         window.setAccessibilityIdentifier("importCSVSheet")
         self.parent = parent
@@ -650,14 +784,22 @@ final class ImportCSVController: NSObject {
 
     func chooseFile(_ completion: @escaping (URL?) -> Void) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText, UTType(filenameExtension: "tsv") ?? .plainText]
+        panel.allowedContentTypes = ImportFileTypes.all
         panel.allowsOtherFileTypes = true
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a CSV or TSV file"
+        panel.message = "Choose a CSV, TSV, JSON, NDJSON or Excel (.xlsx) file"
         if let parent = window.isVisible ? window : parent {
             panel.beginSheetModal(for: parent) { response in completion(response == .OK ? panel.url : nil) }
         } else {
             completion(panel.runModal() == .OK ? panel.url : nil)
         }
+    }
+}
+
+/// File types the import sheet opens.
+enum ImportFileTypes {
+    static var all: [UTType] {
+        [.commaSeparatedText, .tabSeparatedText, .plainText, .json]
+            + ["tsv", "ndjson", "jsonl", "xlsx"].compactMap { UTType(filenameExtension: $0) }
     }
 }

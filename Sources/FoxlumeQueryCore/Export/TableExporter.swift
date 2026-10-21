@@ -1,6 +1,6 @@
 import Foundation
 
-/// Exports whole tables to CSV, JSON, NDJSON or SQL files, streaming rows page by page.
+/// Exports whole tables to CSV, JSON, NDJSON, XLSX or SQL files, streaming rows page by page.
 ///
 /// Runs synchronously on the caller's thread against one `DatabaseConnection`, so call it from the
 /// session queue (`DatabaseSession.run`) of a session used for nothing else: the export holds a
@@ -223,6 +223,7 @@ public final class TableExporter {
         case .csv: try writeCSV(&tables, writer: writer, tracker: &tracker)
         case .json: try writeJSON(&tables, writer: writer, tracker: &tracker)
         case .ndjson: try writeNDJSON(&tables, writer: writer, tracker: &tracker)
+        case .xlsx: try writeXLSX(&tables, writer: writer, tracker: &tracker)
         }
     }
 
@@ -314,6 +315,36 @@ public final class TableExporter {
                 }
             }
         }
+    }
+
+    // MARK: XLSX
+
+    /// One workbook with a sheet per table; a table past Excel's row limit continues on "name (2)" and so on.
+    private func writeXLSX(_ tables: inout ArraySlice<Prepared>, writer: ExportFileWriter, tracker: inout ProgressTracker) throws {
+        let book = XLSXWorkbookWriter(output: writer)
+        let names = tables.map(\.item.table)
+        let repeated = Set(Dictionary(grouping: names, by: { $0.name.lowercased() }).filter { $0.value.count > 1 }.keys)
+        for index in tables.indices {
+            let table = tables[index].item.table
+            let sheetName = repeated.contains(table.name.lowercased()) ? (table.schema.map { "\($0).\(table.name)" } ?? table.name) : table.name
+            var started = false
+            try streamRows(&tables[index], tracker: &tracker, tableIndex: index) { resultColumns, rows in
+                if !started {
+                    try book.beginTable(name: sheetName, columns: resultColumns.map(ExportColumn.init), sample: rows)
+                    started = true
+                }
+                for row in rows { try book.writeRow(row) }
+            }
+            if !started { try book.beginTable(name: sheetName, columns: [], sample: []) }
+            try book.endTable()
+            if book.truncatedValues > 0 {
+                warnings.append("\(book.truncatedValues) \(book.truncatedValues == 1 ? "value" : "values") in \(table.name) had more than 32,767 characters, Excel's limit for a cell, and \(book.truncatedValues == 1 ? "was" : "were") cut.")
+            }
+            if book.sheetsInTable > 1 {
+                warnings.append("\(table.name) has more rows than fit on one Excel sheet; it continues on \(book.sheetsInTable - 1) more \(book.sheetsInTable == 2 ? "sheet" : "sheets").")
+            }
+        }
+        try book.finish()
     }
 
     // MARK: SQL

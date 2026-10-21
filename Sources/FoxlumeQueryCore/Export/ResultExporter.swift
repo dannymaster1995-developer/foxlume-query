@@ -6,6 +6,7 @@ public enum ExportFormat: String, CaseIterable, Sendable, Identifiable {
     case json
     case sqlInsert
     case markdown
+    case xlsx
 
     public var id: String { rawValue }
 
@@ -16,6 +17,7 @@ public enum ExportFormat: String, CaseIterable, Sendable, Identifiable {
         case .json: return "JSON"
         case .sqlInsert: return "SQL INSERT"
         case .markdown: return "Markdown"
+        case .xlsx: return "Excel (XLSX)"
         }
     }
 
@@ -26,6 +28,7 @@ public enum ExportFormat: String, CaseIterable, Sendable, Identifiable {
         case .json: return "json"
         case .sqlInsert: return "sql"
         case .markdown: return "md"
+        case .xlsx: return "xlsx"
         }
     }
 }
@@ -45,6 +48,48 @@ public enum ResultExporter {
         case .json: return json(columns: columns, rows: rows)
         case .sqlInsert: return inserts(columns: columns, rows: rows, tableName: tableName, dialect: dialect)
         case .markdown: return markdown(columns: columns, rows: rows)
+        case .xlsx:
+            // A binary format: `write` makes the file. As text it reads like TSV.
+            return delimited(columns: columns, rows: rows, separator: "\t", includeHeader: includeHeader)
+        }
+    }
+
+    /// Writes the rows to a file in `format`, replacing it only once complete. XLSX files always get a
+    /// header row; `sheetName` names their sheet. Returns warnings, such as values cut to fit a cell.
+    public static func write(
+        columns: [ResultColumn],
+        rows: [[CellValue]],
+        format: ExportFormat,
+        includeHeader: Bool = true,
+        tableName: String = "table_name",
+        sheetName: String = "Sheet1",
+        dialect: SQLDialect = .postgresql,
+        to url: URL
+    ) throws -> [String] {
+        let file = try ExportFileWriter(destination: url, compress: false)
+        do {
+            guard format == .xlsx else {
+                try file.write(export(columns: columns, rows: rows, format: format, includeHeader: includeHeader, tableName: tableName, dialect: dialect))
+                try file.commit()
+                return []
+            }
+            let book = XLSXWorkbookWriter(output: file)
+            try book.beginTable(name: sheetName, columns: columns.map(ExportColumn.init), sample: Array(rows.prefix(1000)))
+            for row in rows { try book.writeRow(row) }
+            try book.endTable()
+            var warnings: [String] = []
+            if book.truncatedValues > 0 {
+                warnings.append("\(book.truncatedValues) \(book.truncatedValues == 1 ? "value had" : "values had") more than 32,767 characters, Excel's limit for a cell, and \(book.truncatedValues == 1 ? "was" : "were") cut.")
+            }
+            if book.sheetsInTable > 1 {
+                warnings.append("The rows did not fit on one Excel sheet; they continue on \(book.sheetsInTable - 1) more \(book.sheetsInTable == 2 ? "sheet" : "sheets").")
+            }
+            try book.finish()
+            try file.commit()
+            return warnings
+        } catch {
+            file.discard()
+            throw error
         }
     }
 

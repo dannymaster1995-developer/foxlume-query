@@ -100,7 +100,8 @@ Sources/
     Explain/            query plan model, parsers per engine, analysis, plan diagram layout
     Diagram/            ER diagram graph and layout
     Theme/              built-in themes, VS Code theme import
-    Export/ Import/     result and table export, CSV import, SQL file runner
+    Export/ Import/     result and table export (CSV, JSON, NDJSON, SQL, XLSX), CSV / JSON / XLSX import, SQL file runner,
+                        ZIP reader and writer (stored, deflated, ZIP64) for XLSX
   FoxlumeQuery/         the AppKit app
   fqprobe/              driver probe CLI
 Tests/                  FoxlumeQueryCoreTests and FoxlumeQueryAppTests

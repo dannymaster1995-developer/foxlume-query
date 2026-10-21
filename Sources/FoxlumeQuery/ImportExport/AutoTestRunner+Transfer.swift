@@ -4,13 +4,16 @@ import FoxlumeQueryCore
 /// Scripted commands for the transfer sheets. File panels are skipped: paths come from the script.
 ///
 ///     exporttables users,orders        open Export Tables with these ticked (none: empty selection)
-///     exportformat sql                 csv | json | ndjson | sql
+///     exportformat sql                 csv | json | ndjson | xlsx | sql
 ///     exportoption rowsPerInsert 100   filePerTable, rowsPerInsert, compress, csvHeader, csvDelimiter, jsonPrettyPrint
 ///     exportfilter users country = 'DE'
 ///     exportrun /path/out.sql          a file, or a folder when each table gets its own file
 ///     exportstart /path/out.csv        starts without waiting; exportstop presses Stop
-///     importcsv users /path/in.csv     open Import CSV for a table and file
-///     importoption policy skipAndContinue   policy, header, emptyAsNull, deleteExisting, delimiter, nullToken
+///     importcsv users /path/in.csv     open the import sheet for a table and a CSV, JSON, NDJSON or XLSX file
+///     importfile users /path/in.xlsx   the same
+///     importoption policy skipAndContinue   policy, header, emptyAsNull, deleteExisting, delimiter, nullToken, sheet
+///     exportresult /path/out.xlsx      writes the selected tab's rows as Export Results does (format from the extension)
+///     xlsxinfo /path/file.xlsx         logs a workbook's sheets, row counts and first rows
 ///     importrun
 ///     runsqlfile /path/in.sql          open Run SQL File for a file
 ///     sqlfileoption policy stopAndKeep policy, fk
@@ -21,7 +24,7 @@ import FoxlumeQueryCore
 enum TransferAutoTest {
     static let commands: Set<String> = [
         "exporttables", "exportformat", "exportoption", "exportfilter", "exportrun", "exportstart", "exportstop",
-        "importcsv", "importoption", "importrun", "runsqlfile", "sqlfileoption", "sqlfilerun", "sheets", "confirmsheet",
+        "importcsv", "importfile", "importoption", "importrun", "exportresult", "xlsxinfo", "runsqlfile", "sqlfileoption", "sqlfilerun", "sheets", "confirmsheet",
     ]
 
     static func closeSheets() {
@@ -45,7 +48,7 @@ extension AutoTestRunner {
             try await Task.sleep(nanoseconds: 900_000_000)
         case "exportformat":
             guard let model = TransferSheets.exportSheet?.model, let format = TableExportFormat(rawValue: argument) else {
-                throw DatabaseError.unsupported("exportformat csv|json|ndjson|sql")
+                throw DatabaseError.unsupported("exportformat csv|json|ndjson|xlsx|sql")
             }
             model.options.format = format
             try await Task.sleep(nanoseconds: 400_000_000)
@@ -96,13 +99,15 @@ extension AutoTestRunner {
                 case .editing, .running: record("  export: \(model.message ?? "not finished")")
                 }
             }
-        case "importcsv":
+        case "importcsv", "importfile":
             guard let table = workspace.workspace.importableTables.first(where: { $0.name == key }) else {
-                throw DatabaseError.unsupported("importcsv <table> <file>")
+                throw DatabaseError.unsupported("\(command) <table> <file>")
             }
             workspace.presentImportCSV(into: table.ref, file: URL(fileURLWithPath: value))
             try await Task.sleep(nanoseconds: 1_200_000_000)
             if let model = TransferSheets.importSheet?.model {
+                if model.kind == .xlsx { record("  sheets: \(model.sheetNames.joined(separator: ", ")) (importing \(model.sheet ?? "none"))") }
+                if let error = model.previewError { record("  preview: \(error)") }
                 record("  mapping: " + model.sources.map { "\($0.name)→\($0.column ?? "skip")" }.joined(separator: ", "))
             }
         case "importoption":
@@ -116,6 +121,10 @@ extension AutoTestRunner {
             case "emptyAsNull": model.options.emptyAsNull = value == "true"
             case "deleteExisting": model.options.deleteExistingRows = value == "true"
             case "nullToken": model.options.nullToken = value
+            case "sheet":
+                model.setSheet(value)
+                try await Task.sleep(nanoseconds: 600_000_000)
+                record("  mapping: " + model.sources.map { "\($0.name)→\($0.column ?? "skip")" }.joined(separator: ", "))
             case "delimiter":
                 model.options.delimiter = CSVDelimiter.allCases.first { $0.title.lowercased() == value.lowercased() }
                 model.reloadPreview()
@@ -131,6 +140,42 @@ extension AutoTestRunner {
             case .finished(let summary): record("  import: \(summary.title) — \(summary.detail) — issues: \(summary.issues.map { "line \($0.line)" }.joined(separator: ", "))")
             case .failed(let error): record("  import failed: \(error)")
             case .editing, .running: record("  import: \(model.message ?? model.mappingProblem ?? "not started")")
+            }
+        case "exportresult":
+            let url = URL(fileURLWithPath: argument)
+            guard let format = ExportFormat.allCases.first(where: { $0.fileExtension == url.pathExtension.lowercased() }) else {
+                throw DatabaseError.unsupported("exportresult /path/file.<csv|tsv|json|sql|md|xlsx>")
+            }
+            let content = workspace.tabs.selectedTab?.content
+            let grid: DataGridView
+            let name: String
+            if let query = content as? QueryTabViewController {
+                grid = query.grid
+                name = query.tabTitle
+            } else if let tableTab = content as? TableTabViewController {
+                grid = tableTab.grid
+                name = tableTab.table.name
+            } else {
+                throw DatabaseError.unsupported("exportresult needs a query or table tab")
+            }
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let warnings = try ExportPanel.write(columns: grid.content.columns, rows: grid.content.rows, format: format, includeHeader: true,
+                                                 suggestedName: name, tableName: name, dialect: workspace.workspace.dialect, to: url)
+            record("  exported \(grid.content.rows.count) rows to \(url.lastPathComponent)" + (warnings.isEmpty ? "" : " — " + warnings.joined(separator: " ")))
+        case "xlsxinfo":
+            let workbook = try XLSXWorkbook(url: URL(fileURLWithPath: argument))
+            for sheet in workbook.sheets {
+                let reader = try workbook.reader(for: sheet)
+                var rows: [CSVRecord] = []
+                var count = 0
+                while let record = try reader.next() {
+                    if rows.count < 3 { rows.append(record) }
+                    count += 1
+                }
+                record("  sheet \(sheet.name): \(count) rows")
+                for row in rows {
+                    record("    " + row.fields.map { $0.isNull ? "∅" : $0.text }.joined(separator: " | "))
+                }
             }
         case "runsqlfile":
             workspace.presentRunSQLFile(file: URL(fileURLWithPath: argument))

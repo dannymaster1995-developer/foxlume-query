@@ -2,7 +2,7 @@ import AppKit
 import FoxlumeQueryCore
 import UniformTypeIdentifiers
 
-/// File menu and sidebar entry points of Export Tables, Import CSV and Run SQL File.
+/// File menu and sidebar entry points of Export Tables, Import Data and Run SQL File.
 extension WorkspaceWindowController {
     /// File > Export Tables… (⌥⇧⌘E): ticks the table selected in the sidebar, if any.
     @objc func exportTables(_ sender: Any?) {
@@ -14,7 +14,7 @@ extension WorkspaceWindowController {
         ExportTablesController(workspace: workspace, preselected: Set(tables), parent: window).present()
     }
 
-    /// File > Import CSV into Table… (⇧⌘I): chooses the file first, then shows the mapping sheet.
+    /// File > Import Data into Table… (⇧⌘I): chooses a CSV, JSON or XLSX file first, then shows the mapping sheet.
     @objc func importCSV(_ sender: Any?) {
         let selected = sidebarSelection.flatMap { ref in workspace.importableTables.first { $0.ref == ref }?.ref }
         presentImportCSV(into: selected)
@@ -32,9 +32,9 @@ extension WorkspaceWindowController {
         }
         if let file { return show(file) }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText]
+        panel.allowedContentTypes = ImportFileTypes.all
         panel.allowsOtherFileTypes = true
-        panel.message = "Choose a CSV or TSV file to import" + (table.map { " into \($0.name)" } ?? "")
+        panel.message = "Choose a CSV, TSV, JSON, NDJSON or Excel (.xlsx) file to import" + (table.map { " into \($0.name)" } ?? "")
         open(panel) { url in show(url) }
     }
 

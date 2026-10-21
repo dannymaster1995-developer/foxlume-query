@@ -5,16 +5,20 @@ struct ExportColumn: Hashable, Sendable {
     var name: String
     var isNumeric: Bool
     var isBoolean: Bool
+    /// The server's type name, for writers that treat dates and times apart (XLSX).
+    var typeName: String
 
-    init(name: String, isNumeric: Bool = false, isBoolean: Bool = false) {
+    init(name: String, isNumeric: Bool = false, isBoolean: Bool = false, typeName: String = "") {
         self.name = name
         self.isNumeric = isNumeric
         self.isBoolean = isBoolean
+        self.typeName = typeName
     }
 
     init(_ column: ResultColumn) {
         name = column.name
         isNumeric = column.isNumeric
+        typeName = column.typeName
         let type = column.typeName.lowercased()
         isBoolean = type == "bool" || type == "boolean"
     }

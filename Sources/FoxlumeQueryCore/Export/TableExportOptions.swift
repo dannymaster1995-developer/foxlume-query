@@ -5,6 +5,7 @@ public enum TableExportFormat: String, CaseIterable, Sendable, Identifiable, Cod
     case csv
     case json
     case ndjson
+    case xlsx
     case sql
 
     public var id: String { rawValue }
@@ -14,6 +15,7 @@ public enum TableExportFormat: String, CaseIterable, Sendable, Identifiable, Cod
         case .csv: return "CSV"
         case .json: return "JSON"
         case .ndjson: return "NDJSON"
+        case .xlsx: return "Excel (XLSX)"
         case .sql: return "SQL"
         }
     }
@@ -23,6 +25,7 @@ public enum TableExportFormat: String, CaseIterable, Sendable, Identifiable, Cod
         case .csv: return "Comma-separated values with a header row, one file per table."
         case .json: return "An array of row objects per table."
         case .ndjson: return "One JSON object per line, one file per table."
+        case .xlsx: return "An Excel workbook with a bold, frozen header row; numbers, booleans and dates keep their types. Tables over 1,048,576 rows continue on extra sheets."
         case .sql: return "CREATE TABLE and INSERT statements that rebuild the tables."
         }
     }
@@ -32,12 +35,13 @@ public enum TableExportFormat: String, CaseIterable, Sendable, Identifiable, Cod
         case .csv: return "csv"
         case .json: return "json"
         case .ndjson: return "ndjson"
+        case .xlsx: return "xlsx"
         case .sql: return "sql"
         }
     }
 
-    /// Whether several tables can share one file in this format.
-    public var supportsCombinedFile: Bool { self == .sql || self == .json }
+    /// Whether several tables can share one file in this format (one sheet per table for XLSX).
+    public var supportsCombinedFile: Bool { self == .sql || self == .json || self == .xlsx }
 }
 
 public enum CSVQuoting: String, CaseIterable, Sendable, Identifiable, Codable {

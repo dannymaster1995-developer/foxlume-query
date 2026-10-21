@@ -759,7 +759,7 @@ extension SidebarViewController: NSMenuDelegate {
             if workspace.supportsTableTransfer, let info = menuTargetInfo {
                 menu.addItem(item("Export…", #selector(menuExport(_:))))
                 if info.kind == .table, !workspace.isReadOnly {
-                    menu.addItem(item("Import CSV…", #selector(menuImportCSV(_:))))
+                    menu.addItem(item("Import Data…", #selector(menuImportCSV(_:))))
                 }
                 menu.addItem(.separator())
             }

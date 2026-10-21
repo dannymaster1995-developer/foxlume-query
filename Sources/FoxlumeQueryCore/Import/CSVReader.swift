@@ -1,22 +1,48 @@
 import Foundation
 
-/// One field of a CSV record. `wasQuoted` tells `""` (an empty string) from an empty field (no value).
+/// One field of an imported record. `wasQuoted` tells `""` (an empty string) from an empty field (no value);
+/// JSON and spreadsheet strings count as quoted. `isNull` is an explicit null (JSON `null`, an empty cell).
 public struct CSVField: Hashable, Sendable {
     public var text: String
     public var wasQuoted: Bool
+    public var isNull: Bool
 
     public init(_ text: String, quoted: Bool = false) {
         self.text = text
         self.wasQuoted = quoted
+        self.isNull = false
     }
+
+    public static let null: CSVField = {
+        var field = CSVField("")
+        field.isNull = true
+        return field
+    }()
 }
 
-/// A CSV record and the line it starts on (1-based, counting physical lines of the file).
+/// A record and the line it starts on (1-based, counting physical lines of the file; the row number for
+/// spreadsheets).
 public struct CSVRecord: Hashable, Sendable {
     public var fields: [CSVField]
     public var line: Int
 
+    public init(fields: [CSVField], line: Int) {
+        self.fields = fields
+        self.line = line
+    }
+
     public var texts: [String] { fields.map(\.text) }
+}
+
+/// Where `CSVImporter` reads records from: a CSV file, a JSON or NDJSON file, or a spreadsheet.
+public protocol ImportRecordReader: AnyObject {
+    /// The next record, or nil at the end.
+    func next() throws -> CSVRecord?
+    /// Bytes of the file taken so far and in all, for progress.
+    var bytesRead: Int64 { get }
+    var totalBytes: Int64 { get }
+    /// The record as text for error messages.
+    func snippet(_ record: CSVRecord) -> String
 }
 
 /// Field separators offered for CSV files.
@@ -43,7 +69,7 @@ public enum CSVDelimiter: String, CaseIterable, Sendable, Identifiable, Codable 
 /// Streaming RFC 4180 parser. Records may span lines inside quotes; CR, LF and CRLF all end a record.
 /// The parser is lenient where real files are sloppy: a quote inside an unquoted field is kept as text,
 /// and text after a closing quote is appended to the field.
-public final class CSVReader {
+public final class CSVReader: ImportRecordReader {
     /// A single field larger than this almost always means a stray quote swallowed the rest of the file.
     static let maxFieldBytes = 64 << 20
 
@@ -62,6 +88,10 @@ public final class CSVReader {
     public init(url: URL, delimiter: CSVDelimiter, encoding: ImportTextEncoding = .automatic, chunkSize: Int = 1 << 16) throws {
         self.source = try TextChunkSource(url: url, encoding: encoding, chunkSize: chunkSize)
         self.delimiter = delimiter.byte
+    }
+
+    public func snippet(_ record: CSVRecord) -> String {
+        TransferText.snippet(record.texts.joined(separator: String(UnicodeScalar(delimiter))))
     }
 
     private enum State {

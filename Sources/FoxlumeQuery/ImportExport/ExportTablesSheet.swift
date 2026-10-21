@@ -595,13 +595,14 @@ private struct ExportOptionsPanel: View {
             case .sql: sqlOptions
             case .csv: csvOptions
             case .json: jsonOptions
-            case .ndjson: EmptyView()
+            case .ndjson, .xlsx: EmptyView()
             }
             Section("Output") {
                 if model.options.format.supportsCombinedFile {
+                    let workbook = model.options.format == .xlsx
                     Picker("Files", selection: $model.options.filePerTable) {
-                        Text("One file").tag(false)
-                        Text("One file per table").tag(true)
+                        Text(workbook ? "One workbook, a sheet per table" : "One file").tag(false)
+                        Text(workbook ? "One workbook per table" : "One file per table").tag(true)
                     }
                     .pickerStyle(.radioGroup)
                 } else {

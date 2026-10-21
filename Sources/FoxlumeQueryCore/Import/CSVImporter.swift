@@ -119,7 +119,8 @@ public enum CSVImportMapping {
     }
 }
 
-/// Imports a CSV file into an existing table with multi-row INSERTs.
+/// Imports a CSV file, or the records of any `ImportRecordReader` (JSON, NDJSON, XLSX), into an existing
+/// table with multi-row INSERTs.
 ///
 /// Values are sent as quoted text and the server converts them to the column types, so dates, numbers,
 /// booleans, JSON and UUIDs need no parsing here. Runs synchronously; call it on the session queue of a
@@ -160,13 +161,22 @@ public final class CSVImporter {
     }
 
     public func run(file: URL, progress: @escaping (CSVImportProgress) -> Void = { _ in }) throws -> CSVImportReport {
+        if let problem = CSVImportMapping.problem(with: mapping, columns: structure.columns) {
+            throw DatabaseError.unsupported(problem)
+        }
+        let delimiter = try options.delimiter ?? CSVReader.preview(url: file, delimiter: nil, encoding: options.encoding, limit: 0).delimiter
+        let reader = try CSVReader(url: file, delimiter: delimiter, encoding: options.encoding)
+        return try run(reader: reader, skipFirstRecord: options.hasHeaderRow, progress: progress)
+    }
+
+    /// Imports the records of `reader`. `skipFirstRecord` drops a header row; `binaryAsBase64` reads text going
+    /// into binary columns as Base64 (how JSON exports write bytes) as well as `0x…` hex.
+    public func run(reader: ImportRecordReader, skipFirstRecord: Bool, binaryAsBase64: Bool = false, progress: @escaping (CSVImportProgress) -> Void = { _ in }) throws -> CSVImportReport {
         let started = Date()
         if let problem = CSVImportMapping.problem(with: mapping, columns: structure.columns) {
             throw DatabaseError.unsupported(problem)
         }
         let dialect = connection.dialect
-        let delimiter = try options.delimiter ?? CSVReader.preview(url: file, delimiter: nil, encoding: options.encoding, limit: 0).delimiter
-        let reader = try CSVReader(url: file, delimiter: delimiter, encoding: options.encoding)
         let columns = mapping.map { entry in structure.columns.first { $0.name == entry.column } }
         let overriding = dialect.family == .postgresql && columns.contains { $0?.extra == "GENERATED ALWAYS AS IDENTITY" }
         let prefix = "INSERT INTO \(dialect.qualifiedName(table)) (" + mapping.map { dialect.quoteIdentifier($0.column) }.joined(separator: ", ") + ")"
@@ -247,17 +257,17 @@ public final class CSVImporter {
             readLoop: while let record = try reader.next() {
                 if isFirst {
                     isFirst = false
-                    if options.hasHeaderRow { continue }
+                    if skipFirstRecord { continue }
                 }
                 state.rowsRead += 1
                 var values: [String] = []
                 values.reserveCapacity(mapping.count)
                 for (position, entry) in mapping.enumerated() {
                     let field = entry.sourceIndex < record.fields.count ? record.fields[entry.sourceIndex] : CSVField("")
-                    values.append(Self.literal(field, column: columns[position], options: options, dialect: dialect))
+                    values.append(Self.literal(field, column: columns[position], options: options, dialect: dialect, base64: binaryAsBase64))
                 }
                 let tuple = "(" + values.joined(separator: ", ") + ")"
-                batch.append(PendingRow(line: record.line, tuple: tuple, preview: TransferText.snippet(record.texts.joined(separator: String(delimiter.rawValue)))))
+                batch.append(PendingRow(line: record.line, tuple: tuple, preview: reader.snippet(record)))
                 batchBytes += tuple.utf8.count
                 if batch.count >= max(1, options.rowsPerInsert) || batchBytes >= options.maxStatementBytes {
                     try cancellation.check()
@@ -320,7 +330,8 @@ public final class CSVImporter {
     // MARK: Values
 
     /// The SQL literal for one field going into `column`.
-    static func literal(_ field: CSVField, column: ColumnInfo?, options: CSVImportOptions, dialect: SQLDialect) -> String {
+    static func literal(_ field: CSVField, column: ColumnInfo?, options: CSVImportOptions, dialect: SQLDialect, base64: Bool = false) -> String {
+        if field.isNull { return "NULL" }
         var text = field.text
         if options.trimWhitespace { text = text.trimmingCharacters(in: .whitespaces) }
         let type = column?.dataType.lowercased() ?? ""
@@ -329,11 +340,13 @@ public final class CSVImporter {
         }
         if !options.nullToken.isEmpty, text == options.nullToken { return "NULL" }
         // MySQL BIT values export as 0x… like binary ones.
-        if isBinary(type) || (dialect.family == .mysql && type.hasPrefix("bit")), let data = hexData(text) {
+        if isBinary(type) || (dialect.family == .mysql && type.hasPrefix("bit")),
+           let data = base64 ? Data(base64Encoded: text) ?? hexData(text) : hexData(text) {
             return dialect.literal(.bytes(data))
         }
-        if dialect.family == .mysql, !type.isEmpty, !isTextLike(type) {
-            // MySQL in strict mode refuses the words true and false for numeric and BIT columns.
+        if dialect.family == .mysql || dialect.family == .sqlite, !type.isEmpty, !isTextLike(type) {
+            // MySQL in strict mode refuses the words true and false for numeric and BIT columns; SQLite would
+            // store them as text in its BOOLEAN (numeric) columns.
             switch text.lowercased() {
             case "true": return "1"
             case "false": return "0"

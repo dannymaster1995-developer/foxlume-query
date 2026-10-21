@@ -71,8 +71,8 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 
 ### Import and export
 
-- **Export Tables** to CSV, JSON, NDJSON or a SQL dump (structure, data or both, optionally gzipped), streamed from a consistent snapshot.
-- **Import CSV** with encoding and delimiter detection, column mapping and a choice of what to do with bad rows.
+- **Export Tables** to CSV, JSON, NDJSON, Excel (XLSX: a sheet per table, typed numbers, booleans and dates, a bold frozen header) or a SQL dump (structure, data or both, optionally gzipped), streamed from a consistent snapshot. Export Results (⇧⌘E) can write XLSX too.
+- **Import CSV, JSON, NDJSON or Excel (XLSX)** into a table with column mapping and a choice of what to do with bad rows: encoding and delimiter detection for CSV, nested JSON values into JSON or text columns, a sheet picker and Excel dates for workbooks.
 - **Run SQL files** (`.sql`, `.sql.gz`) of any size.
 
 ### Connect securely
@@ -101,6 +101,10 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 | Maintenance | Server Activity |
 |---|---|
 | <img src="docs/images/maintenance.png" alt="Optimize Table results for two MySQL tables, with the server's messages, status and time per table" width="420"> | <img src="docs/images/server-activity.png" alt="Server Activity listing PostgreSQL sessions: one idle in a transaction, an UPDATE waiting for its lock and a long report query, with the selected statement below" width="420"> |
+
+| Import from Excel | Export to Excel |
+|---|---|
+| <img src="docs/images/import-xlsx.png" alt="Importing a sheet of an Excel workbook into a table, with a preview of its rows, the column mapping and the sheet picker" width="420"> | <img src="docs/images/export-xlsx.png" alt="Export Tables with the Excel format chosen, writing one workbook with a sheet per table" width="420"> |
 
 </details>
 
@@ -208,7 +212,7 @@ The most used ones:
 | Space | Toggle the selected boolean cells |
 | ⌘= / ⌘- / ⌘C | Zoom in / zoom out / copy as image, in a plan or ER diagram |
 | ⇧⌘E / ⌥⇧⌘E | Export results / export tables |
-| ⇧⌘I | Import CSV into a table |
+| ⇧⌘I | Import CSV, JSON or XLSX into a table |
 
 </details>
 
@@ -235,7 +239,7 @@ Yes, carefully: it is alpha software. Give the connection a Production label and
 <details>
 <summary><b>What is not there yet?</b></summary>
 
-SQL Server and other engines, plan comparison, JSON and XLSX import, MongoDB X.509 authentication and certificate revocation checks. See the [CHANGELOG](CHANGELOG.md) for what is new.
+SQL Server and other engines, plan comparison, MongoDB X.509 authentication and certificate revocation checks. See the [CHANGELOG](CHANGELOG.md) for what is new.
 </details>
 
 ## Contributing

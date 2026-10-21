@@ -702,13 +702,24 @@ enum ExportPanel {
             _ = handler
             guard response == .OK, let url = panel.url else { return }
             let format = ExportFormat.allCases[max(0, formatPopup.indexOfSelectedItem)]
-            let text = ResultExporter.export(columns: columns, rows: rows, format: format, includeHeader: header.state == .on, tableName: tableName, dialect: dialect)
             do {
-                try text.write(to: url, atomically: true, encoding: .utf8)
+                let warnings = try write(columns: columns, rows: rows, format: format, includeHeader: header.state == .on, suggestedName: suggestedName, tableName: tableName, dialect: dialect, to: url)
+                if !warnings.isEmpty {
+                    let alert = NSAlert()
+                    alert.messageText = "Exported with warnings"
+                    alert.informativeText = warnings.joined(separator: "\n")
+                    alert.beginSheetModal(for: window)
+                }
             } catch {
                 Alerts.showError(error, title: "Export failed", in: window)
             }
         }
+    }
+
+    /// Writes the file the panel asked for; XLSX sheets are named after the tab. Returns warnings.
+    static func write(columns: [ResultColumn], rows: [[CellValue]], format: ExportFormat, includeHeader: Bool, suggestedName: String, tableName: String, dialect: SQLDialect, to url: URL) throws -> [String] {
+        try ResultExporter.write(columns: columns, rows: rows, format: format, includeHeader: includeHeader, tableName: tableName,
+                                 sheetName: suggestedName, dialect: dialect, to: url)
     }
 
     @MainActor

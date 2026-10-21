@@ -52,7 +52,7 @@ Schema and server:
 - [x] FQ-112 Server activity: running sessions, cancel or kill a query, slow queries
 
 Data in and out:
-- [ ] FQ-113 XLSX export; JSON and XLSX import
+- [x] FQ-113 XLSX export; JSON and XLSX import
 - [ ] FQ-114 Backup and restore with pg_dump / pg_restore and mysqldump
 
 Navigation and safety:
