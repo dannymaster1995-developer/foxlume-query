@@ -17,7 +17,7 @@ public struct InlineSuggestion: Sendable, Equatable {
 
 /// Where inline suggestions come from. The editor's suggestion manager owns the debounce, the cancellation and the
 /// grey text; a source only answers one request at a time. Cancelling the calling task must cancel the source's
-/// work. The chat API source is the first; a language server (GitHub Copilot) can be another.
+/// work. The chat API source is the first; GitHub Copilot's language server (`CopilotInlineSuggestionSource`) the other.
 public protocol InlineSuggestionSource: AnyObject, Sendable {
     /// Nil when the source has nothing useful. Throws `AIProviderError` (or `CancellationError`) on failure.
     func suggestion(for request: InlineSuggestionRequest) async throws -> InlineSuggestion?
@@ -56,14 +56,17 @@ public final class ChatInlineSuggestionSource: InlineSuggestionSource {
 public enum InlineSuggestionSources {
     /// The source an editor of `connection` in `language` uses, or nil when nothing may be sent (AI off, inline
     /// suggestions off, no usable provider, a Never policy or an Ask policy not answered yet, MongoDB or Redis).
+    /// A Copilot provider needs `copilot`; each Copilot source is a document of its own.
     public static func make(
         settings: AISettings,
         connection: ConnectionConfig,
         language: QueryLanguage,
         keys: AIKeyStore,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        copilot: CopilotService? = nil
     ) -> InlineSuggestionSource? {
         guard let provider = availability(settings: settings, connection: connection, language: language, keys: keys).provider else { return nil }
+        if provider.kind == .copilot { return copilot.map(CopilotInlineSuggestionSource.init(service:)) }
         return ChatInlineSuggestionSource(provider: provider, apiKey: keys.apiKey(for: provider.id), session: session)
     }
 

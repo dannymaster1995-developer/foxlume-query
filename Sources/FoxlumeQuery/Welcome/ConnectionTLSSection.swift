@@ -183,8 +183,9 @@ struct FormScroller: ViewModifier {
         ScrollViewReader { proxy in
             content.onChange(of: target) { value in
                 guard let value else { return }
-                // The test result is the last section: show it at the bottom, with what precedes it above.
-                proxy.scrollTo(value, anchor: value == "result" ? .bottom : .top)
+                // The test result is the last section: show it at the bottom, with what precedes it above. Settings'
+                // GitHub Copilot part is shown whole, ending at the bottom.
+                proxy.scrollTo(value, anchor: value == "result" || value == SettingsSection.copilot ? .bottom : .top)
                 target = nil
             }
         }

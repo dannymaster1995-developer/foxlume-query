@@ -61,7 +61,7 @@ Navigation and safety:
 
 AI in the editor (off by default; nothing leaves the Mac unless the user turns it on):
 - [x] FQ-120 Inline suggestions: grey ghost text after the caret from an AI provider (OpenAI-compatible, including Ollama and other local models, and Claude), with the schema as context; Tab accepts, Esc dismisses; API keys in the Keychain
-- [ ] FQ-121 GitHub Copilot as a source of inline suggestions: Sign in with GitHub in Settings, the Copilot language server downloaded on first use at a pinned version and checksum, telemetry off by default
+- [x] FQ-121 GitHub Copilot as a source of inline suggestions: Sign in with GitHub in Settings, the Copilot language server downloaded on first use at a pinned version and checksum, telemetry off by default
 
 Quality and release:
 - [ ] FQ-117 Server version matrix on GitHub Actions (on release tags, weekly and on demand): PostgreSQL 13 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4

@@ -321,12 +321,21 @@ final class TabsViewController: NSViewController {
         remove(at: index)
     }
 
+    /// The window closes: the query tabs' GitHub Copilot documents are closed at the language server.
+    func retireInlineSuggestions() {
+        for tab in tabs {
+            (tab.content as? QueryTabViewController)?.inlineSourceCache.retire()
+        }
+    }
+
     private func remove(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         let tab = tabs.remove(at: index)
         recency.remove(tab.id)
         if let query = tab.content as? QueryTabViewController {
             closedTabs.append((nil, query.sql, query.tabTitle, query.fileURL))
+            // Its GitHub Copilot document is closed at the language server.
+            query.inlineSourceCache.retire()
         } else if let table = tab.table {
             closedTabs.append((table, nil, nil, nil))
         }

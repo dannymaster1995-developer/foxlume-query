@@ -12,13 +12,19 @@ public struct InlineSuggestionRequest: Sendable, Equatable {
     public var schema: [AISchemaTable]?
     /// Asked with the Suggest command rather than after a pause in typing.
     public var manual: Bool
+    /// How the editor indents (Tab inserts this many spaces); the language server formats its answer to match.
+    public var tabSize: Int
+    public var insertSpaces: Bool
 
-    public init(text: String, caret: Int, dialect: String, schema: [AISchemaTable]? = nil, manual: Bool = false) {
+    public init(text: String, caret: Int, dialect: String, schema: [AISchemaTable]? = nil, manual: Bool = false,
+                tabSize: Int = 4, insertSpaces: Bool = true) {
         self.text = text
         self.caret = caret
         self.dialect = dialect
         self.schema = schema
         self.manual = manual
+        self.tabSize = tabSize
+        self.insertSpaces = insertSpaces
     }
 }
 

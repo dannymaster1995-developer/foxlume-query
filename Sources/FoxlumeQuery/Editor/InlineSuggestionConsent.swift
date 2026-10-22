@@ -81,9 +81,11 @@ final class InlineSuggestionGate {
         if answer == .allow { onAllowed?(manual) }
     }
 
-    /// The policy or the session's answer changed elsewhere (another tab, the connection form): a prompt that is no
-    /// longer needed goes.
+    /// The policy, Settings › AI or the session's answer changed elsewhere (another tab, the connection form): a prompt
+    /// that is no longer needed goes, and so does a source that may no longer send.
     func refresh() {
+        // Also makes the cache drop a source that may no longer send (its Copilot document is closed then).
+        _ = cache.availability(for: connection(), language: language)
         if isPrompting, !awaitsConsent { closePrompt() }
     }
 
@@ -159,6 +161,6 @@ final class AIConsentBar: NSView {
     @objc private func never(_ sender: Any?) { onAnswer?(.never) }
 
     @objc private func showSettings(_ sender: Any?) {
-        SettingsWindowController.shared.show(section: SettingsSection.ai)
+        SettingsWindowController.shared.show(section: SettingsSection.aiForActiveProvider)
     }
 }

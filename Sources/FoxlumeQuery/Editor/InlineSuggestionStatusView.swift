@@ -2,7 +2,9 @@ import AppKit
 import FoxlumeQueryCore
 
 /// Keeps the inline suggestion source of one editor and makes a new one only when what it depends on changes:
-/// Settings › AI, a stored key, the connection's AI policy or the editor's language.
+/// Settings › AI, a stored key, the connection's AI policy or the editor's language. A GitHub Copilot source is the
+/// tab's document at the language server: when it is replaced or dropped (the policy is no longer Allow, AI or
+/// Copilot is off, the tab closes) its document is closed there.
 @MainActor
 final class InlineSuggestionSourceCache {
     private struct Key: Equatable {
@@ -15,17 +17,20 @@ final class InlineSuggestionSourceCache {
     var keys: AIKeyStore
     var session: URLSession
     var settings: @MainActor () -> AISettings
+    var copilot: @MainActor () -> CopilotService?
     private var key: Key?
     private var source: InlineSuggestionSource?
     private var cachedAvailability: AIInlineAvailability = .aiDisabled
     private var keysVersion = 0
     private var observer: NSObjectProtocol?
 
-    /// Nil arguments use the app's key store and Settings › AI.
-    init(keys: AIKeyStore? = nil, session: URLSession = .shared, settings: (@MainActor () -> AISettings)? = nil) {
+    /// Nil arguments use the app's key store, Settings › AI and Copilot service.
+    init(keys: AIKeyStore? = nil, session: URLSession = .shared, settings: (@MainActor () -> AISettings)? = nil,
+         copilot: (@MainActor () -> CopilotService?)? = nil) {
         self.keys = keys ?? AppEnvironment.aiKeys
         self.session = session
         self.settings = settings ?? { AppEnvironment.settings.ai }
+        self.copilot = copilot ?? { CopilotEnvironment.service }
         observer = NotificationCenter.default.addObserver(forName: AIKeyStore.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.keysVersion += 1 }
         }
@@ -51,7 +56,19 @@ final class InlineSuggestionSourceCache {
         guard current != key else { return }
         key = current
         cachedAvailability = InlineSuggestionSources.availability(settings: current.settings, connection: connection, language: language, keys: keys)
-        source = cachedAvailability.provider.map { ChatInlineSuggestionSource(provider: $0, apiKey: keys.apiKey(for: $0.id), session: session) }
+        (source as? CopilotInlineSuggestionSource)?.retireDocument()
+        // The Copilot service is only looked at for a Copilot provider.
+        let service = cachedAvailability.provider?.kind == .copilot ? copilot() : nil
+        source = InlineSuggestionSources.make(settings: current.settings, connection: connection, language: language, keys: keys,
+                                              session: session, copilot: service)
+    }
+
+    /// The tab closed: a Copilot document goes at once, and nothing more is asked.
+    func retire() {
+        (source as? CopilotInlineSuggestionSource)?.retireDocument()
+        source = nil
+        key = nil
+        cachedAvailability = .aiDisabled
     }
 }
 
@@ -121,6 +138,6 @@ final class InlineSuggestionStatusView: NSStackView {
     }
 
     @objc private func openSettings(_ sender: Any?) {
-        SettingsWindowController.shared.show(section: SettingsSection.ai)
+        SettingsWindowController.shared.show(section: SettingsSection.aiForActiveProvider)
     }
 }

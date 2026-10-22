@@ -36,14 +36,18 @@ let package = Package(
             name: "fqprobe",
             dependencies: ["FoxlumeQueryCore"]
         ),
+        /// A stand-in for the GitHub Copilot language server, for tests and scripted UI checks; never shipped.
+        .executableTarget(
+            name: "fqfakelsp"
+        ),
         .testTarget(
             name: "FoxlumeQueryCoreTests",
-            dependencies: ["FoxlumeQueryCore"]
+            dependencies: ["FoxlumeQueryCore", "fqfakelsp"]
         ),
         /// App-level checks (editor completion, filter bar, workspace caches) against the real AppKit classes.
         .testTarget(
             name: "FoxlumeQueryAppTests",
-            dependencies: ["FoxlumeQuery", "FoxlumeQueryCore"]
+            dependencies: ["FoxlumeQuery", "FoxlumeQueryCore", "fqfakelsp"]
         ),
     ],
     swiftLanguageModes: [.v5]

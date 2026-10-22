@@ -549,6 +549,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         tabs.saveState()
+        tabs.retireInlineSuggestions()
         serverActivityController?.close()
         workspace.cancelEverything()
         let workspace = self.workspace

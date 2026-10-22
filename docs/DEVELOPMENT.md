@@ -21,6 +21,8 @@ scripts/build-app.sh        # release app in build/Foxlume Query.app (ad-hoc sig
 - `Tests/FoxlumeQueryCoreTests`: Swift Testing suites for the core library (drivers, SQL, completion, storage, import and export, Explain, diagrams, TLS).
 - `Tests/FoxlumeQueryAppTests`: checks of the editor, filter bar, workspace caches, saved queries, Open Quickly and grid selection against the real AppKit classes. They open small windows for a moment.
 
+The GitHub Copilot tests never use the network, a GitHub account or the real language server: downloads go through a URLProtocol stub with a tarball made on the spot, and the integration tests run `fqfakelsp` (`Sources/fqfakelsp`, built with the tests), a stand-in that speaks LSP over stdio and is steered by files in its state folder. Debug builds run it in place of the real server when `FOXLUME_COPILOT_SERVER` points at it.
+
 ### Live database tests
 
 Live suites run when a server answers on its port on 127.0.0.1, and skip otherwise:
@@ -77,6 +79,7 @@ Run it without arguments for every option, including SSH and TLS settings.
 | Connections, settings, history, saved queries, filter presets, ER diagram layouts, grid column layouts, sidebar favourites and recents, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
 | Database and SSH passwords, TLS key passphrases | macOS Keychain, service `com.foxlume.query.connection` |
 | AI provider API keys | macOS Keychain, service `com.foxlume.query.ai` |
+| GitHub Copilot language server (downloaded when Copilot is turned on) | `~/Library/Application Support/Foxlume Query/copilot-language-server/<version>/`; the GitHub sign-in is kept by the language server itself |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder (passwords in a file readable only by you). `scripts/run-portable.sh` starts the app this way.
 
@@ -109,6 +112,11 @@ Sources/
                         dialect, schema context), request building and response parsing for OpenAI-compatible and Anthropic
                         APIs, the URLSession client and error mapping, answer clean-up, and the InlineSuggestionSource protocol
                         with its chat API implementation (tests stub the network with a URLProtocol; no real provider is called)
+      Copilot/          GitHub Copilot: the pinned language server release and its installer (npm download, SHA-256 checks,
+                        tar), the service (start, idle stop, crash restart with a generation counter, sign-in, server
+                        messages), the schema preamble and line offsets, document sync and completion-to-grey-text mapping
+    LSP/                language server client: JSON values, Content-Length framing, JSON-RPC messages, the endpoint
+                        (request ids, timeouts, $/cancelRequest, server requests) and the stdio process
     Backup/             Backup and Restore with the user's pg_dump, pg_restore, psql, mysqldump and mysql: tool discovery and
                         versions, command lines (TLS, SSH tunnel), private password and client key files, backup file
                         detection, process-group runner
@@ -116,6 +124,7 @@ Sources/
     Editor/             SQL editor, completion list, inline suggestion manager (debounce, cancellation, accept), grey text
                         and the Ask prompt of the per-connection AI policy
   fqprobe/              driver probe CLI
+  fqfakelsp/            stand-in for the GitHub Copilot language server, for tests and scripted UI checks (never shipped)
 Tests/                  FoxlumeQueryCoreTests and FoxlumeQueryAppTests
 scripts/                build, environment, test servers, test certificates, sample data
 docs/                   this guide and the README images

@@ -5,6 +5,13 @@ import SwiftUI
 /// Sections of the Settings window that other windows can scroll to.
 enum SettingsSection {
     static let ai = "ai"
+    static let copilot = "copilot"
+
+    /// Where "AI Settings…" and "What is sent?" lead: the GitHub Copilot part when Copilot gives the suggestions.
+    @MainActor
+    static var aiForActiveProvider: String {
+        AppEnvironment.settings.ai.activeProvider?.kind == .copilot ? copilot : ai
+    }
 }
 
 /// Asks the Settings form to scroll to a section.
@@ -17,15 +24,16 @@ final class SettingsNavigation: ObservableObject {
 enum AIPrivacyNote {
     /// Shown under Settings › AI; also the wording the README's FAQ follows.
     static let text = """
-        Nothing leaves your Mac until you turn on AI features and add a provider. For a suggestion, Foxlume Query \
-        sends the active provider only: up to 2,000 characters of the query editor before the cursor and 500 after it, \
-        the database engine's name and, when Include schema is on, the names and types of up to the set number of \
-        tables and their columns with primary keys, NOT NULL and foreign keys. It never sends row values, query \
-        results, connection details, host names or passwords. What the provider does with it is governed by that \
-        provider's terms. API keys stay in the macOS Keychain (in portable mode, in the data folder's private \
-        credentials file). Each connection has an AI setting: Allow, Ask or Never. New connections ask the first \
-        time and send nothing before you answer; Production connections default to Never, and Never sends nothing. \
-        MongoDB and Redis editors get no suggestions yet.
+        Nothing leaves your Mac until you turn on AI features and add a provider. For a suggestion from an \
+        OpenAI-compatible or Anthropic provider, Foxlume Query sends that provider only: up to 2,000 characters of the \
+        query editor before the cursor and 500 after it, the database engine's name and, when Include schema is on, the \
+        names and types of up to the set number of tables and their columns with primary keys, NOT NULL and foreign \
+        keys. It never sends row values, query results, connection details, host names or passwords. What the provider \
+        does with it is governed by that provider's terms. GitHub Copilot gets the whole query tab instead (see GitHub \
+        Copilot below). API keys stay in the macOS Keychain (in portable mode, in the data folder's private credentials \
+        file). Each connection has an AI setting: Allow, Ask or Never. New connections ask the first time and send \
+        nothing before you answer; Production connections default to Never, and Never sends nothing. MongoDB and Redis \
+        editors get no suggestions yet.
         """
 }
 
@@ -52,12 +60,15 @@ struct AISettingsSection: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(provider.displayName)
-                            Text("\(provider.kind.title) · \(provider.model.isEmpty ? "no model" : provider.model)")
+                            Text(provider.kind == .copilot ? "Language server · settings below" :
+                                    "\(provider.kind.title) · \(provider.model.isEmpty ? "no model" : provider.model)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Edit…") { editor = AIProviderEditorModel(provider: provider) }
+                        if provider.kind != .copilot {
+                            Button("Edit…") { editor = AIProviderEditorModel(provider: provider) }
+                        }
                         Button("Remove") { remove(provider) }
                     }
                 }
@@ -221,7 +232,7 @@ struct AIProviderEditorView: View {
             Form {
                 Section {
                     Picker("Type", selection: Binding(get: { model.provider.kind }, set: { model.changeKind(to: $0) })) {
-                        ForEach(AIProviderKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                        ForEach(AIProviderKind.chatKinds, id: \.self) { Text($0.title).tag($0) }
                     }
                     .accessibilityIdentifier("aiProviderKind")
                     if model.provider.kind == .openAICompatible {

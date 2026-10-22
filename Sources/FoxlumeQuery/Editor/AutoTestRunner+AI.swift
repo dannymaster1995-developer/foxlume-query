@@ -9,11 +9,24 @@ import FoxlumeQueryCore
 ///                                     requests were sent
 ///     aiprompt [seconds]              waits until the query tab shows the Ask prompt, and logs it
 ///     aiconsent allow|notnow|never    answers the Ask prompt as its buttons do
-///     aisettings                      opens Settings scrolled to the AI section
+///     aisettings [copilot]            opens Settings scrolled to the AI section (or its GitHub Copilot part)
 ///     aipolicy allow|never            saves the front workspace's connection with that AI policy
+///
+/// GitHub Copilot (debug builds run the program in FOXLUME_COPILOT_SERVER, the fqfakelsp stand-in, instead):
+///
+///     copilot on|off                  turns Copilot on (and AI features, with Copilot as the provider) or off
+///     copilotsignin                   Sign in with GitHub, then waits for the device code
+///     copilotsignout                  Sign Out
+///     copilotwait <state> [seconds]   waits for running, stopped, signedin, signingin or signedout
+///     copilotstate                    logs the server and sign-in state, the open documents and what would have been
+///                                     opened in the browser or copied
+///     copilotmessage [seconds]        waits for a server message panel and logs its text and buttons
+///     copilotanswer <title>           answers the open message panel with that button
 @MainActor
 enum AIAutoTest {
-    static let commands: Set<String> = ["aisuggest", "aiwait", "aistate", "aisettings", "aipolicy", "aiprompt", "aiconsent"]
+    static let commands: Set<String> = ["aisuggest", "aiwait", "aistate", "aisettings", "aipolicy", "aiprompt", "aiconsent",
+                                        "copilot", "copilotsignin", "copilotsignout", "copilotwait", "copilotstate",
+                                        "copilotmessage", "copilotanswer"]
 }
 
 extension AutoTestRunner {
@@ -46,8 +59,10 @@ extension AutoTestRunner {
             query.answerAIConsent(answer)
             try await Task.sleep(nanoseconds: 300_000_000)
         case "aisettings":
-            SettingsWindowController.shared.show(section: SettingsSection.ai)
+            SettingsWindowController.shared.show(section: argument == "copilot" ? SettingsSection.copilot : SettingsSection.ai)
             try await Task.sleep(nanoseconds: 900_000_000)
+        case "copilot", "copilotsignin", "copilotsignout", "copilotwait", "copilotstate", "copilotmessage", "copilotanswer":
+            try await performCopilot(command, argument)
         case "aipolicy":
             guard let window = workspace, var config = AppEnvironment.connections.connection(id: window.workspace.config.id) else {
                 throw DatabaseError.notConnected
@@ -69,5 +84,66 @@ extension AutoTestRunner {
         }
         // Let the editor draw the grey text before a snapshot.
         try await Task.sleep(nanoseconds: 300_000_000)
+    }
+
+    private func performCopilot(_ command: String, _ argument: String) async throws {
+        let service = CopilotEnvironment.service
+        switch command {
+        case "copilot":
+            var settings = AppEnvironment.settings
+            switch argument {
+            case "on":
+                settings.ai.enabled = true
+                settings.ai.setCopilotEnabled(true)
+            case "off":
+                settings.ai.setCopilotEnabled(false)
+            default:
+                throw DatabaseError.unsupported("copilot on|off")
+            }
+            AppEnvironment.settings = settings
+            try await Task.sleep(nanoseconds: 300_000_000)
+        case "copilotsignin":
+            service.signIn()
+            try await waitFor(seconds: 10) {
+                switch service.authState {
+                case .signingIn, .signedIn: return true
+                default: return service.authError != nil
+                }
+            }
+            try await Task.sleep(nanoseconds: 300_000_000)
+        case "copilotsignout":
+            await service.signOut()
+            try await Task.sleep(nanoseconds: 300_000_000)
+        case "copilotwait":
+            let parts = argument.split(separator: " ").map(String.init)
+            let seconds = parts.count > 1 ? Double(parts[1]) ?? 10 : 10
+            let check: () -> Bool
+            switch parts.first ?? "" {
+            case "running": check = { service.serverState == .running }
+            case "stopped": check = { service.serverState == .stopped }
+            case "signedin": check = { service.isSignedIn }
+            case "signedout": check = { service.authState == .signedOut }
+            case "signingin": check = { if case .signingIn = service.authState { return true } else { return false } }
+            default: throw DatabaseError.unsupported("copilotwait running|stopped|signedin|signingin|signedout [seconds]")
+            }
+            try await waitFor(seconds: seconds, check)
+            try await Task.sleep(nanoseconds: 300_000_000)
+        case "copilotstate":
+            let note = service.statusNote.map { "\($0.kind.rawValue) \"\($0.message)\"" } ?? "none"
+            record("  copilot server: \(service.serverState); auth: \(service.authState); note: \(note); documents: \(service.openDocumentCount)"
+                   + "; opened: \(CopilotEnvironment.recordedURLs.map(\.absoluteString)); copied: \(CopilotEnvironment.recordedClipboard)"
+                   + (service.authError.map { "; error: \($0)" } ?? ""))
+        case "copilotmessage":
+            try await waitFor(seconds: Double(argument) ?? 10) { !CopilotMessagePanel.open.isEmpty }
+            if let panel = CopilotMessagePanel.open.first {
+                record("  message: \"\(panel.message.text)\"; buttons: \(panel.actionTitles)")
+            }
+        case "copilotanswer":
+            guard let panel = CopilotMessagePanel.open.first else { throw DatabaseError.unsupported("copilotanswer needs an open message") }
+            panel.answer(argument.isEmpty ? nil : argument)
+            try await Task.sleep(nanoseconds: 300_000_000)
+        default:
+            break
+        }
     }
 }

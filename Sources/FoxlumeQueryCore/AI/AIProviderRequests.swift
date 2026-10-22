@@ -33,6 +33,9 @@ public enum AIRequestBuilder {
                 ["type": "text", "text": prompt.contextText, "cache_control": ["type": "ephemeral"]],
             ]
             return try anthropicRequest(provider: provider, apiKey: apiKey, system: system, user: prompt.userMessage, maxTokens: anthropicMaxTokens)
+        case .copilot:
+            // Copilot is asked through its language server, never over HTTP.
+            throw AIProviderError.invalidBaseURL
         }
     }
 
@@ -44,6 +47,8 @@ public enum AIRequestBuilder {
             return try openAIRequest(provider: provider, apiKey: apiKey, system: nil, user: question, purpose: .test)
         case .anthropic:
             return try anthropicRequest(provider: provider, apiKey: apiKey, system: nil, user: question, maxTokens: 1024)
+        case .copilot:
+            throw AIProviderError.invalidBaseURL
         }
     }
 
@@ -111,6 +116,8 @@ public enum AIRequestBuilder {
             request.setValue(key, forHTTPHeaderField: "x-api-key")
             request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
             if let beta { request.setValue(beta, forHTTPHeaderField: "anthropic-beta") }
+        case .copilot:
+            break
         }
         if request.httpMethod == "POST" { request.setValue("application/json", forHTTPHeaderField: "content-type") }
         request.setValue("application/json", forHTTPHeaderField: "accept")
@@ -185,6 +192,8 @@ public enum AIResponseParser {
             // Only text blocks; thinking and fallback blocks are not part of the answer.
             let text = content.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined()
             return AICompletion(text: text, stopReason: stop, cacheReadTokens: cacheRead)
+        case .copilot:
+            throw AIProviderError.invalidResponse
         }
     }
 
@@ -224,6 +233,8 @@ public enum AIProviderError: Error, Equatable, LocalizedError, Sendable {
     case invalidResponse
     case invalidBaseURL
     case cancelled
+    /// The source cannot answer until the user does something, such as signing in to GitHub Copilot.
+    case notReady(String)
 
     public var errorDescription: String? {
         switch self {
@@ -236,6 +247,7 @@ public enum AIProviderError: Error, Equatable, LocalizedError, Sendable {
         case .invalidResponse: return "The provider sent an answer that is not understood"
         case .invalidBaseURL: return "The base URL is not a valid http or https URL"
         case .cancelled: return "Cancelled"
+        case .notReady(let message): return message
         }
     }
 
@@ -261,6 +273,8 @@ public enum AIProviderError: Error, Equatable, LocalizedError, Sendable {
     public static func from(_ error: Error) -> AIProviderError {
         if let error = error as? AIProviderError { return error }
         if error is CancellationError { return .cancelled }
+        if let error = error as? JSONRPCError, error.isCancellation { return .cancelled }
+        if let error = error as? CopilotInstallError { return .notReady(error.localizedDescription) }
         guard let urlError = error as? URLError else { return .network(error.localizedDescription) }
         switch urlError.code {
         case .cancelled: return .cancelled

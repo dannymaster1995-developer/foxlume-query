@@ -6,11 +6,17 @@ public enum AIProviderKind: String, Codable, CaseIterable, Sendable {
     case openAICompatible
     /// Anthropic's Messages API (`POST {base}/messages`).
     case anthropic
+    /// GitHub Copilot through its language server, which the app downloads and runs; no URL, model or key.
+    case copilot
+
+    /// The kinds the provider form offers; Copilot has its own section in Settings › AI.
+    public static let chatKinds: [AIProviderKind] = [.openAICompatible, .anthropic]
 
     public var title: String {
         switch self {
         case .openAICompatible: return "OpenAI-compatible"
         case .anthropic: return "Anthropic (Claude)"
+        case .copilot: return "GitHub Copilot"
         }
     }
 
@@ -18,6 +24,7 @@ public enum AIProviderKind: String, Codable, CaseIterable, Sendable {
         switch self {
         case .openAICompatible: return "https://api.openai.com/v1"
         case .anthropic: return "https://api.anthropic.com/v1"
+        case .copilot: return ""
         }
     }
 
@@ -25,6 +32,7 @@ public enum AIProviderKind: String, Codable, CaseIterable, Sendable {
         switch self {
         case .openAICompatible: return ""
         case .anthropic: return "claude-opus-5-5"
+        case .copilot: return ""
         }
     }
 
@@ -83,6 +91,7 @@ public struct AIProviderConfig: Codable, Hashable, Sendable, Identifiable {
 
     /// What the form says is missing before the provider can be used.
     public var validationMessage: String? {
+        if kind == .copilot { return nil }
         if normalizedBaseURL == nil { return "Enter an http or https base URL." }
         if model.trimmingCharacters(in: .whitespaces).isEmpty { return "Enter a model." }
         return nil
@@ -101,6 +110,8 @@ public struct AISettings: Codable, Equatable, Sendable {
     /// Send table and column names, types, keys and foreign keys of the current schema with each request.
     public var includeSchema = true
     public var maxSchemaTables = 20
+    /// Let the Copilot language server send GitHub its usage telemetry; off sends `telemetryLevel: off`.
+    public var copilotTelemetry = false
 
     public static let debounceRange = 200...3000
     public static let schemaTableRange = 1...200
@@ -133,8 +144,34 @@ public struct AISettings: Codable, Equatable, Sendable {
         if activeProviderID == id { activeProviderID = providers.first?.id }
     }
 
+    /// The GitHub Copilot entry of the provider list, when Copilot is on.
+    public var copilotProvider: AIProviderConfig? {
+        providers.first { $0.kind == .copilot }
+    }
+
+    /// Turning Copilot on adds it to the providers and makes it the one suggestions use; off removes it.
+    public mutating func setCopilotEnabled(_ enabled: Bool) {
+        if enabled {
+            let provider = copilotProvider ?? AIProviderConfig(name: AIProviderKind.copilot.title, kind: .copilot)
+            upsert(provider)
+            activeProviderID = provider.id
+        } else if let provider = copilotProvider {
+            removeProvider(id: provider.id)
+        }
+    }
+
+    /// The Copilot language server may run: AI is on and Copilot is one of the providers (Settings can sign in then).
+    public var copilotMayRun: Bool {
+        enabled && copilotProvider != nil
+    }
+
+    /// Copilot is what inline suggestions use: the server starts on its own (and checks the sign-in) only then.
+    public var copilotIsInlineSource: Bool {
+        enabled && inlineSuggestions && activeProvider?.kind == .copilot
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case enabled, providers, activeProviderID, inlineSuggestions, debounceMilliseconds, includeSchema, maxSchemaTables
+        case enabled, providers, activeProviderID, inlineSuggestions, debounceMilliseconds, includeSchema, maxSchemaTables, copilotTelemetry
     }
 
     public init(from decoder: Decoder) throws {
@@ -147,6 +184,7 @@ public struct AISettings: Codable, Equatable, Sendable {
         debounceMilliseconds = try container.decodeIfPresent(Int.self, forKey: .debounceMilliseconds) ?? defaults.debounceMilliseconds
         includeSchema = try container.decodeIfPresent(Bool.self, forKey: .includeSchema) ?? defaults.includeSchema
         maxSchemaTables = try container.decodeIfPresent(Int.self, forKey: .maxSchemaTables) ?? defaults.maxSchemaTables
+        copilotTelemetry = try container.decodeIfPresent(Bool.self, forKey: .copilotTelemetry) ?? defaults.copilotTelemetry
     }
 }
 

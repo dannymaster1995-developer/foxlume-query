@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         didFinishLaunching = true
         moveEmbeddedPasswordsToCredentialStore()
+        CopilotEnvironment.activate()
         reportUnreadableConnections()
         reportUnreadableSavedQueries()
         if pendingOpenURLs.isEmpty {
@@ -76,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         workspaces.forEach { $0.tabs.saveState() }
         SSHTunnel.stopAll()
+        CopilotEnvironment.shutdown()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

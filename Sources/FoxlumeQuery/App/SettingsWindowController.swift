@@ -105,6 +105,8 @@ struct SettingsView: View {
             BackupToolsSection(settings: $settings)
             AISettingsSection(settings: $settings)
                 .id(SettingsSection.ai)
+            CopilotSettingsSection(settings: $settings)
+                .id(SettingsSection.copilot)
             Section("Storage") {
                 LabeledContent("Data folder") {
                     Text(AppPaths.dataDirectory.path)
