@@ -238,6 +238,13 @@ struct ConnectionFormView: View {
                             Text(environment.displayName).tag(environment)
                         }
                     }
+                    if model.config.environment != .none {
+                        Text(AppEnvironment.settings.tintsToolbar(for: model.config.environment)
+                            ? "Its windows get a \(model.config.environment.displayName) toolbar tint. Settings › Appearance chooses the tinted environments."
+                            : "Settings › Appearance can tint the toolbar of \(model.config.environment.displayName) windows.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     HStack {
                         Text("Color")
                         Spacer()

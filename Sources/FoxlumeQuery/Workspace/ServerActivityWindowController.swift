@@ -10,6 +10,10 @@ final class ServerActivityWindowController: NSWindowController, NSWindowDelegate
     var onClose: (() -> Void)?
     /// Opens text in a new query tab of the workspace window.
     private let openQuery: (String) -> Void
+    /// The connection's environment color and badge in the titlebar, as on the workspace window, so a Kill on
+    /// Production is obviously aimed at Production.
+    let environmentTint = EnvironmentTintBand()
+    let environmentBadge = EnvironmentBadgeAccessory()
 
     init(workspace: ConnectionWorkspace, windows: @escaping () -> [ConnectionWorkspace], openQuery: @escaping (String) -> Void) {
         model = ServerActivityModel(workspace: workspace)
@@ -36,6 +40,15 @@ final class ServerActivityWindowController: NSWindowController, NSWindowDelegate
         window.title = "Server Activity – \(workspace.config.displayName)"
         window.setContentSize(NSSize(width: 1280, height: 640))
         window.center()
+        window.addTitlebarAccessoryViewController(environmentBadge)
+        environmentTint.install(in: window)
+        environmentChanged()
+        NotificationCenter.default.addObserver(self, selector: #selector(environmentChanged), name: ConnectionWorkspace.metadataDidChange, object: workspace)
+    }
+
+    @objc private func environmentChanged() {
+        environmentTint.environment = model.workspace.config.environment
+        environmentBadge.environment = model.workspace.config.environment
     }
 
     required init?(coder: NSCoder) {

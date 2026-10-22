@@ -57,7 +57,7 @@ Data in and out:
 
 Navigation and safety:
 - [x] FQ-115 Recent and favourite tables in the sidebar
-- [ ] FQ-116 Toolbar tinted with the connection's environment colour
+- [x] FQ-116 Toolbar tinted with the connection's environment colour
 
 AI in the editor (off by default; nothing leaves the Mac unless the user turns it on):
 - [ ] FQ-120 Inline suggestions: grey ghost text after the caret from an AI provider (OpenAI-compatible, including Ollama and other local models, and Claude), with the schema as context; Tab accepts, Esc dismisses; API keys in the Keychain

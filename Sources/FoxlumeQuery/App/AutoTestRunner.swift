@@ -119,6 +119,8 @@ final class AutoTestRunner {
             try await performBackup(command, argument)
         case _ where FavouritesAutoTest.commands.contains(command):
             try await performFavourites(command, argument)
+        case _ where TintAutoTest.commands.contains(command):
+            try await performTint(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
             MaintenanceController.presented?.dismiss()

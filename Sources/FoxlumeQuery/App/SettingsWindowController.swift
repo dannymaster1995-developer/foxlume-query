@@ -19,6 +19,18 @@ struct SettingsView: View {
                 Text("System follows macOS. Light and Dark apply to every Foxlume Query window, whatever macOS uses.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                LabeledContent("Tint the window toolbar for") {
+                    HStack(spacing: 12) {
+                        ForEach(EnvironmentTintSettings.order, id: \.self) { environment in
+                            Toggle(environment.displayName, isOn: tintBinding(environment))
+                                .toggleStyle(.checkbox)
+                                .accessibilityIdentifier("toolbarTint-\(environment.rawValue)")
+                        }
+                    }
+                }
+                Text("A connection's window, and its Server Activity window, take the color of its environment behind the toolbar, so a Production window stands out. Connections without an environment are never tinted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Theme") {
                 themePicker("Light theme", selection: $settings.lightThemeID)
@@ -121,6 +133,13 @@ struct SettingsView: View {
         }
     }
 
+    private func tintBinding(_ environment: ConnectionEnvironment) -> Binding<Bool> {
+        Binding(
+            get: { settings.tintsToolbar(for: environment) },
+            set: { settings.setTintsToolbar($0, for: environment) }
+        )
+    }
+
     private func theme(_ id: String) -> ThemeDefinition {
         themes.first { $0.id == id } ?? BuiltInThemes.defaultLight
     }
@@ -161,6 +180,11 @@ struct SettingsView: View {
         if settings.darkThemeID == theme.id { settings.darkThemeID = BuiltInThemes.defaultDarkID }
         themes = ThemeStore.shared.themes
     }
+}
+
+enum EnvironmentTintSettings {
+    /// The environments Settings › Appearance lists, strongest tint first.
+    static let order: [ConnectionEnvironment] = [.production, .staging, .development, .local]
 }
 
 /// A few lines of highlighted SQL drawn with a theme's colors.

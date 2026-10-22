@@ -23,6 +23,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
     private let split = NSSplitViewController()
     private var historyItem: NSSplitViewItem?
     private let statusView = ToolbarStatusView()
+    /// The environment's color behind the titlebar and toolbar, with its accent line on the tab strip.
+    let environmentTint = EnvironmentTintBand()
     private let databasePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     var onClose: ((WorkspaceWindowController) -> Void)?
     /// True while Rename or Copy Database runs (WorkspaceWindowController+Databases.swift).
@@ -121,6 +123,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
 
         statusView.onReconnect = { [weak self] in self?.reconnect(nil) }
         configureToolbar()
+        environmentTint.onAccentChange = { [weak self] color in self?.tabs.strip.accentColor = color }
+        environmentTint.environment = workspace.config.environment
+        environmentTint.install(in: window)
         NotificationCenter.default.addObserver(self, selector: #selector(workspaceChanged), name: ConnectionWorkspace.metadataDidChange, object: workspace)
         NotificationCenter.default.addObserver(self, selector: #selector(themeChanged), name: ThemeManager.didChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(workspaceChanged), name: ConnectionWorkspace.activityDidChange, object: workspace)
@@ -169,6 +174,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func workspaceChanged() {
         statusView.update(with: workspace)
+        environmentTint.environment = workspace.config.environment
         if !workspace.kind.isFileBased {
             var shown = workspace.config
             if let current = workspace.currentDatabase {
@@ -525,6 +531,20 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
             self.window?.close()
         }
         return false
+    }
+
+    /// Full screen moves the toolbar into a window of its own; keep the band in whichever titlebar shows it.
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        reinstallEnvironmentTint()
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        reinstallEnvironmentTint()
+    }
+
+    private func reinstallEnvironmentTint() {
+        guard let window, environmentTint.superview !== window.standardWindowButton(.closeButton)?.superview else { return }
+        environmentTint.install(in: window)
     }
 
     func windowWillClose(_ notification: Notification) {

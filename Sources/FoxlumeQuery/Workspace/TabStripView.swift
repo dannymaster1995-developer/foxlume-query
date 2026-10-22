@@ -34,6 +34,17 @@ final class TabStripView: NSView {
     private var fit = TabStripLayout(visibleCount: 0, tabWidth: 0, hiddenCount: 0)
     /// Tabs shown in the strip, in tab order.
     private(set) var visibleIDs: [UUID] = []
+    /// The thin line along the top in the color of the connection's environment, under the tinted toolbar.
+    private let accentLine = AccentLineView()
+
+    /// The environment accent; nil hides the line.
+    var accentColor: NSColor? {
+        get { accentLine.color }
+        set {
+            accentLine.color = newValue
+            accentLine.isHidden = newValue == nil
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -52,7 +63,14 @@ final class TabStripView: NSView {
         addSubview(overflowButton)
         let bottom = UI.separator()
         addSubview(bottom)
+        accentLine.translatesAutoresizingMaskIntoConstraints = false
+        accentLine.isHidden = true
+        addSubview(accentLine)
         NSLayoutConstraint.activate([
+            accentLine.leadingAnchor.constraint(equalTo: leadingAnchor),
+            accentLine.trailingAnchor.constraint(equalTo: trailingAnchor),
+            accentLine.topAnchor.constraint(equalTo: topAnchor),
+            accentLine.heightAnchor.constraint(equalToConstant: 2),
             addButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             addButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             addButton.widthAnchor.constraint(equalToConstant: 24),
@@ -158,6 +176,21 @@ final class TabStripView: NSView {
     @objc private func addClicked(_ sender: Any?) {
         onAdd?()
     }
+}
+
+/// A filled line whose color follows the view's appearance.
+private final class AccentLineView: NSView {
+    var color: NSColor? {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let color else { return }
+        color.setFill()
+        bounds.fill(using: .sourceOver)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 private final class TabButtonView: NSView {

@@ -101,7 +101,7 @@ Sources/
     Tabs/               tab strip layout: how many tabs fit and which stay in view
     Explain/            query plan model, parsers per engine, analysis, plan diagram layout
     Diagram/            ER diagram graph and layout
-    Theme/              built-in themes, VS Code theme import
+    Theme/              built-in themes, VS Code theme import, environment tint colors for windows
     Export/ Import/     result and table export (CSV, JSON, NDJSON, SQL, XLSX), CSV / JSON / XLSX import, SQL file runner,
                         ZIP reader and writer (stored, deflated, ZIP64) for XLSX
     Backup/             Backup and Restore with the user's pg_dump, pg_restore, psql, mysqldump and mysql: tool discovery and

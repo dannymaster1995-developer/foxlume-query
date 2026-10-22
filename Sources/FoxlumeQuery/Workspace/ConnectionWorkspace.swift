@@ -39,6 +39,7 @@ final class ConnectionWorkspace {
     private var healthTask: Task<Void, Never>?
     private var monitoredHealthCheck: ConnectionHealthCheck?
     private var settingsObserver: NSObjectProtocol?
+    private var connectionsObserver: NSObjectProtocol?
     private var reconnectTask: Task<Void, Error>?
     static let pingTimeout: TimeInterval = 10
 
@@ -54,6 +55,17 @@ final class ConnectionWorkspace {
         self.config = config
         self.password = password
         self.session = DatabaseSession(parameters: ConnectionParameters(config: config, password: password, sshSecret: sshSecret, tlsSecret: tlsSecret))
+        connectionsObserver = NotificationCenter.default.addObserver(forName: ConnectionStore.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.adoptSavedEnvironment() }
+        }
+    }
+
+    /// An environment changed in the connection form applies to the open window at once: its toolbar tint and badge,
+    /// and the Production confirmations. Other settings wait for the next connect.
+    func adoptSavedEnvironment() {
+        guard let saved = AppEnvironment.connections.connection(id: config.id), saved.environment != config.environment else { return }
+        config.environment = saved.environment
+        NotificationCenter.default.post(name: Self.metadataDidChange, object: self)
     }
 
     var kind: DatabaseKind { config.kind }
@@ -108,6 +120,7 @@ final class ConnectionWorkspace {
     func disconnect() async {
         healthTask?.cancel()
         if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
+        if let connectionsObserver { NotificationCenter.default.removeObserver(connectionsObserver) }
         prefetchTask?.cancel()
         completionCatalog.cancelLoads()
         schemaObjectCatalog.cancel()

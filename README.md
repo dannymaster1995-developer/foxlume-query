@@ -82,6 +82,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **TLS 1.3**, with Verify CA / Verify Identity modes, a custom CA and client certificates (PEM or PKCS#12).
 - **SSH tunnels**, connection URLs (`postgres://`, `mysql://`…) and passwords kept in the macOS Keychain.
 - **Safe Mode** per connection: Silent, Alert, Safe Mode with Touch ID, or Read-Only. Production connections are clearly labelled.
+- **Environment-tinted toolbar**: a Production window's toolbar turns red and a Staging one orange (Development and Local on request in Settings › Appearance), and so does its Server Activity window, so a Production window is hard to mistake for another.
 - **Query timeout and startup commands** per connection: stop queries that run too long, and run SQL such as `SET search_path` or `SET time_zone` on every new session, reconnects included.
 
 <details>
@@ -111,6 +112,10 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 | Backup | Restore |
 |---|---|
 | <img src="docs/images/backup.png" alt="The Backup sheet for two tables of a MySQL database, with mysqldump's options: routines, triggers, events, DROP TABLE, single transaction and gzip" width="420"> | <img src="docs/images/restore.png" alt="The Restore sheet for a mysqldump script, choosing the database to restore into and whether to run it with Run SQL File or the mysql client" width="420"> |
+
+| Production toolbar tint | Production toolbar tint (dark) |
+|---|---|
+| <img src="docs/images/toolbar-tint-production.png" alt="A Production connection's window with a red-tinted toolbar, a red accent line above the tabs and the PRODUCTION badge" width="420"> | <img src="docs/images/toolbar-tint-production-dark.png" alt="The same Production window in dark appearance, its toolbar tinted dark red" width="420"> |
 
 </details>
 

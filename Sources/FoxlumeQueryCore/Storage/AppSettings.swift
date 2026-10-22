@@ -25,6 +25,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var appearance: AppearanceMode = .system
     public var lightThemeID: String = BuiltInThemes.defaultLightID
     public var darkThemeID: String = BuiltInThemes.defaultDarkID
+    /// Environments whose windows get a tinted toolbar (Settings › Appearance); Production and Staging by default.
+    public var toolbarTintEnvironments: Set<ConnectionEnvironment> = [.production, .staging]
     /// Paths chosen in Settings › Backup Tools, keyed by `BackupTool.rawValue`; a missing key means "find it".
     public var backupToolPaths: [String: String] = [:]
 
@@ -39,6 +41,20 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public mutating func setBackupToolPath(_ tool: BackupTool, _ path: String?) {
         let trimmed = path?.trimmingCharacters(in: .whitespaces) ?? ""
         backupToolPaths[tool.rawValue] = trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Whether windows of a connection in `environment` get the environment's toolbar tint. Never without an environment.
+    public func tintsToolbar(for environment: ConnectionEnvironment) -> Bool {
+        environment != .none && toolbarTintEnvironments.contains(environment)
+    }
+
+    public mutating func setTintsToolbar(_ tints: Bool, for environment: ConnectionEnvironment) {
+        guard environment != .none else { return }
+        if tints {
+            toolbarTintEnvironments.insert(environment)
+        } else {
+            toolbarTintEnvironments.remove(environment)
+        }
     }
 
     public init(from decoder: Decoder) throws {
@@ -60,6 +76,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         appearance = try container.decodeIfPresent(AppearanceMode.self, forKey: .appearance) ?? defaults.appearance
         lightThemeID = Self.migratedThemeID(try container.decodeIfPresent(String.self, forKey: .lightThemeID)) ?? defaults.lightThemeID
         darkThemeID = Self.migratedThemeID(try container.decodeIfPresent(String.self, forKey: .darkThemeID)) ?? defaults.darkThemeID
+        toolbarTintEnvironments = (try? container.decodeIfPresent(Set<ConnectionEnvironment>.self, forKey: .toolbarTintEnvironments)) ?? defaults.toolbarTintEnvironments
         backupToolPaths = (try? container.decodeIfPresent([String: String].self, forKey: .backupToolPaths)) ?? defaults.backupToolPaths
     }
 }
