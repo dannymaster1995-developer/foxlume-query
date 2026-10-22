@@ -66,6 +66,7 @@ AI in the editor (off by default; nothing leaves the Mac unless the user turns i
 Quality and release:
 - [ ] FQ-117 Server version matrix on GitHub Actions (on release tags, weekly and on demand): PostgreSQL 13 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4
 - [ ] FQ-118 UI autotest scripts that walk every PostgreSQL and MySQL feature against the local servers; the whole set runs before each release
+- [ ] FQ-123 In-app updates with Sparkle: Check for Updates…, a daily check that can be turned off, release notes and Install and Relaunch; release zips signed with EdDSA and listed in an appcast on the site; only the app version is sent
 - [ ] FQ-119 Publish v0.1.0 on GitHub Releases with a downloadable app
 
 ## v0.2.0: more databases, most used first
