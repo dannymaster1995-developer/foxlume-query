@@ -36,6 +36,8 @@ Live suites run when a server answers on its port on 127.0.0.1, and skip otherwi
 
 The credentials are local test values (see `scripts/dbtest.sh` and the `scripts/seed-*` files). Never point the tests at a real server. `scripts/dbtest.sh start` seeds a fresh data folder once from the `scripts/seed-*` files (`reset` deletes the data and starts again); on PostgreSQL and MySQL that includes `perf_big`, two million generated rows (`id`, `payload` = md5 of the id, `at`; no key or index) for the export paging, Explain and plan diagram tests, which adds about four seconds per server to a fresh start. `scripts/tls-test-certs.sh` creates the test CA, server and client certificates; they are never committed.
 
+The Backup and Restore live suites also need the client tools. MySQL's `mysqldump` and `mysql` come with the test server in `../.dbtest/mysql-bin`. The PostgreSQL test server is server-only, so put PostgreSQL client tools of the same major version or newer (`pg_dump`, `pg_restore`, `psql` and the libraries they link) in `../.dbtest/pg-client/bin`: `scripts/env.sh` then exports `FQ_PG_CLIENT_BIN` and the suites use those copies. Without that folder the suites use the tools discovery finds on the Mac (PATH, Homebrew, Postgres.app) and skip when there are none.
+
 `scripts/redis-extra.sh start` adds Redis Sentinel, Cluster and TLS servers for their suites. With every server running, use `fqtest --no-parallel`: in parallel, the live suites occupy all of Swift Testing's threads and the timing checks of the cancel and interrupt tests fail.
 
 ## Making a change
@@ -102,6 +104,9 @@ Sources/
     Theme/              built-in themes, VS Code theme import
     Export/ Import/     result and table export (CSV, JSON, NDJSON, SQL, XLSX), CSV / JSON / XLSX import, SQL file runner,
                         ZIP reader and writer (stored, deflated, ZIP64) for XLSX
+    Backup/             Backup and Restore with the user's pg_dump, pg_restore, psql, mysqldump and mysql: tool discovery and
+                        versions, command lines (TLS, SSH tunnel), private password and client key files, backup file
+                        detection, process-group runner
   FoxlumeQuery/         the AppKit app
   fqprobe/              driver probe CLI
 Tests/                  FoxlumeQueryCoreTests and FoxlumeQueryAppTests

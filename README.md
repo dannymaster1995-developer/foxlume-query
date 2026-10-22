@@ -73,7 +73,8 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 
 - **Export Tables** to CSV, JSON, NDJSON, Excel (XLSX: a sheet per table, typed numbers, booleans and dates, a bold frozen header) or a SQL dump (structure, data or both, optionally gzipped), streamed from a consistent snapshot. Export Results (⇧⌘E) can write XLSX too.
 - **Import CSV, JSON, NDJSON or Excel (XLSX)** into a table with column mapping and a choice of what to do with bad rows: encoding and delimiter detection for CSV, nested JSON values into JSON or text columns, a sheet picker and Excel dates for workbooks.
-- **Run SQL files** (`.sql`, `.sql.gz`) of any size.
+- **Run SQL files** (`.sql`, `.sql.gz`) of any size, including mysqldump scripts with `DELIMITER` blocks.
+- **Backup and Restore** for PostgreSQL, MySQL and MariaDB with the client tools on your Mac (pg_dump and pg_restore, mysqldump or mariadb-dump): a whole database, some schemas or some tables, in pg_dump's custom, plain, directory or tar format or as a (gzipped) SQL script. Restore archives with pg_restore into this or another database, and scripts with Run SQL File, psql or mysql. Runs through the connection's SSH tunnel and TLS settings, keeps the password off the command line, streams the tool's progress with Cancel, and shows the exact command it ran.
 
 ### Connect securely
 
@@ -105,6 +106,10 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 | Import from Excel | Export to Excel |
 |---|---|
 | <img src="docs/images/import-xlsx.png" alt="Importing a sheet of an Excel workbook into a table, with a preview of its rows, the column mapping and the sheet picker" width="420"> | <img src="docs/images/export-xlsx.png" alt="Export Tables with the Excel format chosen, writing one workbook with a sheet per table" width="420"> |
+
+| Backup | Restore |
+|---|---|
+| <img src="docs/images/backup.png" alt="The Backup sheet for two tables of a MySQL database, with mysqldump's options: routines, triggers, events, DROP TABLE, single transaction and gzip" width="420"> | <img src="docs/images/restore.png" alt="The Restore sheet for a mysqldump script, choosing the database to restore into and whether to run it with Run SQL File or the mysql client" width="420"> |
 
 </details>
 
@@ -234,6 +239,12 @@ Connections, settings, history and saved queries are in `~/Library/Application S
 <summary><b>Can I use it with my production database?</b></summary>
 
 Yes, carefully: it is alpha software. Give the connection a Production label and a Safe Mode (Alert, Safe Mode with Touch ID, or Read-Only), so every write asks first or is refused.
+</details>
+
+<details>
+<summary><b>Backup needs pg_dump / mysqldump</b></summary>
+
+Backup and Restore run the PostgreSQL and MySQL client tools installed on your Mac; Foxlume Query does not include them. Install them with Homebrew, `brew install libpq` (pg_dump, pg_restore and psql) and `brew install mysql-client` (mysqldump and mysql), or `brew install mariadb` for MariaDB servers, or install [Postgres.app](https://postgresapp.com). Foxlume Query finds them in your shell's PATH, Homebrew's folders (keg-only libpq and mysql-client included) and Postgres.app; Settings › Backup Tools shows what it found and lets you choose another copy. pg_dump cannot back up a server newer than itself, so the newest copy found is used and you are warned when it is still too old. Plain `.sql` / `.sql.gz` backups restore without any tool, through Run SQL File.
 </details>
 
 <details>

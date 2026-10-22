@@ -73,6 +73,8 @@ import AppKit
     @objc optional func showERDiagram(_ sender: Any?)
     @objc optional func showServerActivity(_ sender: Any?)
     @objc optional func jumpToColumn(_ sender: Any?)
+    @objc optional func backupDatabase(_ sender: Any?)
+    @objc optional func restoreDatabase(_ sender: Any?)
 }
 
 @MainActor
@@ -167,6 +169,9 @@ enum MainMenu {
             item("New Schema…", #selector(FoxlumeQueryActions.newSchema(_:))),
             item("Rename Schema…", #selector(FoxlumeQueryActions.renameSchema(_:))),
             item("Drop Schema…", #selector(FoxlumeQueryActions.dropSchema(_:))),
+            .separator(),
+            item("Backup…", #selector(FoxlumeQueryActions.backupDatabase(_:))),
+            item("Restore…", #selector(FoxlumeQueryActions.restoreDatabase(_:))),
             .separator(),
             item("ER Diagram", #selector(FoxlumeQueryActions.showERDiagram(_:))),
             maintenance,

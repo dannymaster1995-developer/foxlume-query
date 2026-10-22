@@ -89,6 +89,7 @@ struct SettingsView: View {
                 Toggle("Confirm data changes on Production connections", isOn: $settings.confirmWritesOnProduction)
                 Toggle("Confirm UPDATE and DELETE without WHERE", isOn: $settings.confirmUnboundedWrites)
             }
+            BackupToolsSection(settings: $settings)
             Section("Storage") {
                 LabeledContent("Data folder") {
                     Text(AppPaths.dataDirectory.path)

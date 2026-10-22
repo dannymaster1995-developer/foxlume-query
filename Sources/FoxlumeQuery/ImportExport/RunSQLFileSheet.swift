@@ -14,6 +14,8 @@ final class RunSQLFileModel: ObservableObject {
     }
 
     let workspace: ConnectionWorkspace
+    /// The database the file runs in: the one in use, unless Restore chose another.
+    let targetDatabase: String?
     @Published var fileURL: URL?
     @Published var fileSize: Int64 = 0
     @Published var options: SQLFileRunOptions
@@ -35,8 +37,9 @@ final class RunSQLFileModel: ObservableObject {
     private var countCancellation: OperationCancellation?
     private var transferSession: DatabaseSession?
 
-    init(workspace: ConnectionWorkspace, file: URL?) {
+    init(workspace: ConnectionWorkspace, file: URL?, database: String? = nil) {
         self.workspace = workspace
+        targetDatabase = database
         options = TransferPreferences.load().sqlFile
         if let file { setFile(file) }
     }
@@ -124,9 +127,11 @@ final class RunSQLFileModel: ObservableObject {
         confirm? { [weak self] in self?.start() }
     }
 
+    var databaseName: String { targetDatabase ?? workspace.currentDatabase ?? workspace.config.displayName }
+
     var confirmationText: (message: String, detail: String) {
         ("Run \(fileURL?.lastPathComponent ?? "this file")",
-         "Every statement in the file runs against \(workspace.currentDatabase ?? workspace.config.displayName).")
+         "Every statement in the file runs against \(databaseName).")
     }
 
     func start() {
@@ -144,7 +149,7 @@ final class RunSQLFileModel: ObservableObject {
         Task {
             var session: DatabaseSession?
             do {
-                let opened = try await workspace.openTransferSession()
+                let opened = try await workspace.openTransferSession(database: targetDatabase)
                 session = opened
                 transferSession = opened
                 try cancellation.check()
@@ -307,7 +312,7 @@ struct RunSQLFileView: View {
                 }
             }
             Section {
-                Text("Runs on a separate connection to \(model.workspace.currentDatabase ?? model.workspace.config.displayName). Statements are split on semicolons; COPY … FROM stdin blocks and the mysql client's DELIMITER command are not supported.")
+                Text("Runs on a separate connection to \(model.databaseName). Statements are split on semicolons; the mysql client's DELIMITER command is understood, COPY … FROM stdin blocks are not (restore those with psql from Restore…).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -385,8 +390,8 @@ final class RunSQLFileController: NSObject {
     private weak var parent: NSWindow?
     private var retainSelf: RunSQLFileController?
 
-    init(workspace: ConnectionWorkspace, file: URL?, parent: NSWindow?, onFinished: @escaping () -> Void) {
-        model = RunSQLFileModel(workspace: workspace, file: file)
+    init(workspace: ConnectionWorkspace, file: URL?, database: String? = nil, parent: NSWindow?, onFinished: @escaping () -> Void) {
+        model = RunSQLFileModel(workspace: workspace, file: file, database: database)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 520), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.title = "Run SQL File"
         window.isRestorable = false

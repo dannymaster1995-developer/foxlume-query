@@ -3,6 +3,11 @@
 FQ_PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 FQ_CACHE="$FQ_PROJECT/.build/env"
 export FQ_PROJECT FQ_CACHE
+# PostgreSQL client tools (pg_dump, pg_restore, psql) for the live backup tests; the test server in ../.dbtest/pg-bin
+# has none. Only set when the folder exists, so other machines fall back to the tools on their PATH or skip.
+if [ -d "$FQ_PROJECT/../.dbtest/pg-client/bin" ]; then
+  export FQ_PG_CLIENT_BIN="$(cd "$FQ_PROJECT/../.dbtest/pg-client/bin" && pwd)"
+fi
 export TMPDIR="$FQ_CACHE/tmp/"
 export CLANG_MODULE_CACHE_PATH="$FQ_CACHE/clang-module-cache"
 export SWIFTPM_CACHE="$FQ_CACHE/swiftpm"

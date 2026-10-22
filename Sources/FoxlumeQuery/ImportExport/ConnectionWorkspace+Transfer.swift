@@ -9,14 +9,15 @@ extension ConnectionWorkspace {
 
     /// Opens a second session with the same settings, switched to the database (and read-only mode) in use.
     /// It runs the connection's startup commands but has no query timeout: exports, imports and Run file may take long.
-    /// `queryTimeout` gives it one instead (Server Activity polls with a short one).
-    func openTransferSession(queryTimeout: Int? = nil) async throws -> DatabaseSession {
+    /// `queryTimeout` gives it one instead (Server Activity polls with a short one); `database` switches to another
+    /// database than the one in use (Restore into a chosen database).
+    func openTransferSession(queryTimeout: Int? = nil, database: String? = nil) async throws -> DatabaseSession {
         var parameters = self.session.parameters
         parameters.config.queryTimeout = queryTimeout
         let session = DatabaseSession(parameters: parameters)
         do {
             try await session.connect()
-            if kind.supportsMultipleDatabases, let database = currentDatabase, !database.isEmpty {
+            if kind.supportsMultipleDatabases, let database = database ?? currentDatabase, !database.isEmpty {
                 let current = await session.currentDatabase()
                 if current != database {
                     try await session.run { try $0.useDatabase(database) }

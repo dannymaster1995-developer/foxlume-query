@@ -115,9 +115,13 @@ final class AutoTestRunner {
             try await performMaintenance(command, argument)
         case _ where ActivityAutoTest.commands.contains(command):
             try await performActivity(command, argument)
+        case _ where BackupAutoTest.commands.contains(command):
+            try await performBackup(command, argument)
         case "closesheet":
             TransferAutoTest.closeSheets()
             MaintenanceController.presented?.dismiss()
+            BackupController.presented?.dismiss()
+            RestoreController.presented?.dismiss()
             for window in NSApp.windows {
                 if let sheet = window.attachedSheet { window.endSheet(sheet) }
             }

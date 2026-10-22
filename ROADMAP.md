@@ -53,7 +53,7 @@ Schema and server:
 
 Data in and out:
 - [x] FQ-113 XLSX export; JSON and XLSX import
-- [ ] FQ-114 Backup and restore with pg_dump / pg_restore and mysqldump
+- [x] FQ-114 Backup and restore with pg_dump / pg_restore and mysqldump
 
 Navigation and safety:
 - [ ] FQ-115 Recent and favourite tables in the sidebar

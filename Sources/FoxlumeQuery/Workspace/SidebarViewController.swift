@@ -34,6 +34,11 @@ final class SidebarViewController: NSViewController {
     /// The Maintenance submenu's items for the given tables (empty for the empty area); see
     /// WorkspaceWindowController+Maintenance.swift.
     var maintenanceItems: (([TableInfo]) -> [NSMenuItem])?
+    /// Backup… for the selected tables, the browsed schema or the whole database; see
+    /// WorkspaceWindowController+Backup.swift.
+    var onBackup: ((BackupRequest) -> Void)?
+    /// Restore… from the empty area.
+    var onRestore: (() -> Void)?
 
     private let filterField = NSSearchField()
     private let schemaPopup = ContextMenuPopUpButton()
@@ -480,12 +485,39 @@ final class SidebarViewController: NSViewController {
     }
 
     private func schemaContextMenu() -> NSMenu? {
-        guard renamableSchema != nil else { return nil }
         let menu = NSMenu()
-        let item = NSMenuItem(title: "Rename Schema…", action: #selector(menuRenameSchema(_:)), keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
-        return menu
+        if renamableSchema != nil {
+            let item = NSMenuItem(title: "Rename Schema…", action: #selector(menuRenameSchema(_:)), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        if offersBackup, workspace.kind == .postgresql, workspace.currentSchema != nil {
+            let item = NSMenuItem(title: "Backup Schema…", action: #selector(menuBackupSchema(_:)), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu.items.isEmpty ? nil : menu
+    }
+
+    /// Whether Backup… items are offered: PostgreSQL, MySQL and MariaDB.
+    var offersBackup: Bool { onBackup != nil && workspace.supportsBackup }
+
+    /// What the table menu's Backup… covers: the selection when the clicked row is part of it, else the clicked row.
+    @objc private func menuBackupTables(_ sender: Any?) {
+        let tables = maintenanceTargetInfos.filter { $0.kind != .systemTable }.map(\.ref)
+        onBackup?(tables.isEmpty ? .database : .tables(tables))
+    }
+
+    @objc private func menuBackupDatabase(_ sender: Any?) {
+        onBackup?(.database)
+    }
+
+    @objc private func menuBackupSchema(_ sender: Any?) {
+        if let schema = workspace.currentSchema { onBackup?(.schemas([schema])) }
+    }
+
+    @objc private func menuRestore(_ sender: Any?) {
+        onRestore?()
     }
 
     /// The schema picker's context menu, for scripted checks.
@@ -761,6 +793,9 @@ extension SidebarViewController: NSMenuDelegate {
                 if info.kind == .table, !workspace.isReadOnly {
                     menu.addItem(item("Import Data…", #selector(menuImportCSV(_:))))
                 }
+                if offersBackup {
+                    menu.addItem(item("Backup…", #selector(menuBackupTables(_:))))
+                }
                 menu.addItem(.separator())
             }
             let maintenanceCount = menu.items.count
@@ -792,6 +827,14 @@ extension SidebarViewController: NSMenuDelegate {
         if menuTarget == nil, workspace.supportsTableTransfer {
             menu.addItem(item("Export Tables…", #selector(menuExport(_:))))
             if !workspace.isReadOnly { menu.addItem(item("Run SQL File…", #selector(menuRunSQLFile(_:)))) }
+            menu.addItem(.separator())
+        }
+        if menuTarget == nil, offersBackup {
+            menu.addItem(item("Backup Database…", #selector(menuBackupDatabase(_:))))
+            if workspace.kind == .postgresql, workspace.currentSchema != nil {
+                menu.addItem(item("Backup Schema…", #selector(menuBackupSchema(_:))))
+            }
+            if !workspace.isReadOnly, onRestore != nil { menu.addItem(item("Restore…", #selector(menuRestore(_:)))) }
             menu.addItem(.separator())
         }
         if onNewTable != nil, workspace.canChangeStructure {

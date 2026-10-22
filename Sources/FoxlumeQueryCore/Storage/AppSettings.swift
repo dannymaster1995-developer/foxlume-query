@@ -25,8 +25,21 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var appearance: AppearanceMode = .system
     public var lightThemeID: String = BuiltInThemes.defaultLightID
     public var darkThemeID: String = BuiltInThemes.defaultDarkID
+    /// Paths chosen in Settings › Backup Tools, keyed by `BackupTool.rawValue`; a missing key means "find it".
+    public var backupToolPaths: [String: String] = [:]
 
     public init() {}
+
+    /// The path chosen for `tool` in Settings, or nil to use the copy that discovery finds.
+    public func backupToolPath(_ tool: BackupTool) -> String? {
+        guard let path = backupToolPaths[tool.rawValue]?.trimmingCharacters(in: .whitespaces), !path.isEmpty else { return nil }
+        return path
+    }
+
+    public mutating func setBackupToolPath(_ tool: BackupTool, _ path: String?) {
+        let trimmed = path?.trimmingCharacters(in: .whitespaces) ?? ""
+        backupToolPaths[tool.rawValue] = trimmed.isEmpty ? nil : trimmed
+    }
 
     public init(from decoder: Decoder) throws {
         let defaults = AppSettings()
@@ -47,6 +60,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         appearance = try container.decodeIfPresent(AppearanceMode.self, forKey: .appearance) ?? defaults.appearance
         lightThemeID = Self.migratedThemeID(try container.decodeIfPresent(String.self, forKey: .lightThemeID)) ?? defaults.lightThemeID
         darkThemeID = Self.migratedThemeID(try container.decodeIfPresent(String.self, forKey: .darkThemeID)) ?? defaults.darkThemeID
+        backupToolPaths = (try? container.decodeIfPresent([String: String].self, forKey: .backupToolPaths)) ?? defaults.backupToolPaths
     }
 }
 

@@ -65,6 +65,7 @@ public final class SQLFileRunner {
     ) throws {
         let source = try TextChunkSource(url: url, encoding: encoding, chunkSize: 1 << 18)
         var splitter = ChunkedStatementSplitter(family: family)
+        var directives = ClientDirectiveFilter(family: family)
         var carry: [UInt8] = []
         var appendedSinceSplit = 0
         while let chunk = try source.next() {
@@ -82,7 +83,7 @@ public final class SQLFileRunner {
                 }
                 text = decoded
             }
-            splitter.append(text)
+            splitter.append(directives.filter(text, final: false))
             appendedSinceSplit += text.utf16.count
             // Splitting rescans the pending text, so wait until enough new text arrived to keep the total work linear.
             guard appendedSinceSplit >= splitter.pendingLength / 2 else { continue }
@@ -95,6 +96,7 @@ public final class SQLFileRunner {
         if !carry.isEmpty {
             throw DatabaseError.unsupported("The file ends in the middle of a UTF-8 character.")
         }
+        splitter.append(directives.filter("", final: true))
         for statement in splitter.completeStatements(final: true) {
             guard try body(statement) else { return }
         }
@@ -214,6 +216,75 @@ public final class SQLFileRunner {
             return { _ = try? connection.execute("PRAGMA foreign_keys = ON", rowLimit: nil) }
         case .postgresql, .duckdb:
             return {}
+        }
+    }
+}
+
+/// Handles the client commands dump tools write, which servers do not understand, line by line before splitting:
+///
+/// - MySQL and MariaDB: `DELIMITER ;;` (mysqldump around triggers, routines and events). The line is dropped, and
+///   while another delimiter is in force, a line ending with it ends the statement as `;` would. Bodies keep their
+///   inner `;`: the splitter keeps BEGIN … END blocks whole, and mysqldump puts trigger bodies in `/*!…*/` comments.
+/// - PostgreSQL: psql's `\restrict` and `\unrestrict` (pg_dump 17.6, 16.10 and later, around the whole script).
+///
+/// Dropped lines become empty lines, so statement line numbers stay those of the file.
+struct ClientDirectiveFilter {
+    let family: SQLDialect.Family
+    private(set) var delimiter = ";"
+    /// The last line of the text so far when it has no line break yet.
+    private var pendingLine = ""
+
+    init(family: SQLDialect.Family) {
+        self.family = family
+    }
+
+    mutating func filter(_ text: String, final: Bool) -> String {
+        guard family == .mysql || family == .postgresql else { return text }
+        var complete = pendingLine + text
+        pendingLine = ""
+        if !final {
+            // Hold back a line cut by the chunk boundary; a directive must be seen whole.
+            if let lastBreak = complete.lastIndex(of: "\n") {
+                pendingLine = String(complete[complete.index(after: lastBreak)...])
+                complete = String(complete[...lastBreak])
+            } else {
+                pendingLine = complete
+                return ""
+            }
+        }
+        let marker = family == .mysql ? "delimiter" : "restrict"
+        if delimiter == ";", complete.range(of: marker, options: .caseInsensitive) == nil { return complete }
+        var lines = complete.components(separatedBy: "\n")
+        for index in lines.indices {
+            lines[index] = filterLine(lines[index])
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private mutating func filterLine(_ line: String) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch family {
+        case .mysql:
+            if trimmed.count > 10, trimmed.prefix(10).uppercased() == "DELIMITER " {
+                let value = trimmed.dropFirst(10).trimmingCharacters(in: .whitespaces)
+                if let word = value.split(separator: " ").first, !word.isEmpty {
+                    delimiter = String(word)
+                    return ""
+                }
+            }
+            guard delimiter != ";" else { return line }
+            var end = line.endIndex
+            while end > line.startIndex, line[line.index(before: end)].isWhitespace { end = line.index(before: end) }
+            let body = line[..<end]
+            guard body.hasSuffix(delimiter) else { return line }
+            return String(body.dropLast(delimiter.count)) + ";"
+        case .postgresql:
+            if trimmed == "\\restrict" || trimmed == "\\unrestrict" || trimmed.hasPrefix("\\restrict ") || trimmed.hasPrefix("\\unrestrict ") {
+                return ""
+            }
+            return line
+        case .sqlite, .duckdb:
+            return line
         }
     }
 }
