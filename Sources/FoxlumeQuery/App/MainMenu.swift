@@ -76,6 +76,7 @@ import AppKit
     @objc optional func backupDatabase(_ sender: Any?)
     @objc optional func restoreDatabase(_ sender: Any?)
     @objc optional func toggleFavourite(_ sender: Any?)
+    @objc optional func suggestInline(_ sender: Any?)
 }
 
 @MainActor
@@ -137,6 +138,7 @@ enum MainMenu {
             item("Explain", #selector(FoxlumeQueryActions.explainQuery(_:)), "e", [.command, .option]),
             item("Explain Analyze", #selector(FoxlumeQueryActions.explainAnalyzeQuery(_:)), "e", [.command, .control]),
             item("Format Query", #selector(FoxlumeQueryActions.formatQuery(_:)), "l", [.command, .shift]),
+            item("Suggest with AI", #selector(FoxlumeQueryActions.suggestInline(_:)), "\\", [.option]),
             item("Add to Saved Queries…", #selector(FoxlumeQueryActions.addToSavedQueries(_:)), "d"),
             .separator(),
             item("Save", #selector(FoxlumeQueryActions.saveAll(_:)), "s"),

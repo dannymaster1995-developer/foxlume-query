@@ -8,6 +8,8 @@ final class ConnectionWorkspace {
     static let activityDidChange = Notification.Name("FoxlumeQuery.ConnectionWorkspace.activityDidChange")
 
     private(set) var config: ConnectionConfig
+    /// Not Now to the AI Ask prompt lasts until the workspace is reopened.
+    let aiConsent = AISessionConsent()
     private(set) var session: DatabaseSession
     private let password: String
 
@@ -61,10 +63,14 @@ final class ConnectionWorkspace {
     }
 
     /// An environment changed in the connection form applies to the open window at once: its toolbar tint and badge,
-    /// and the Production confirmations. Other settings wait for the next connect.
+    /// and the Production confirmations; so does the AI policy. Other settings wait for the next connect.
     func adoptSavedEnvironment() {
-        guard let saved = AppEnvironment.connections.connection(id: config.id), saved.environment != config.environment else { return }
+        guard let saved = AppEnvironment.connections.connection(id: config.id),
+              saved.environment != config.environment || saved.aiPolicy != config.aiPolicy
+        else { return }
         config.environment = saved.environment
+        // The AI policy too, so an answer to the Ask prompt or a change in the form applies to open tabs at once.
+        config.aiPolicy = saved.aiPolicy
         NotificationCenter.default.post(name: Self.metadataDidChange, object: self)
     }
 

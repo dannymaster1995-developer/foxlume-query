@@ -28,6 +28,48 @@ public enum CredentialStores {
     public static func makeDefault() -> CredentialStore {
         AppPaths.isPortable ? FileCredentialStore(url: AppPaths.portableCredentialsFile) : KeychainCredentialStore()
     }
+
+    /// AI provider keys: their own Keychain service normally; the portable credentials file (under `ai.` accounts)
+    /// in portable mode.
+    public static func makeAIDefault(portable: Bool = AppPaths.isPortable) -> CredentialStore {
+        portable
+            ? FileCredentialStore(url: AppPaths.portableCredentialsFile)
+            : KeychainCredentialStore(service: KeychainCredentialStore.aiService, label: "Foxlume Query AI provider")
+    }
+}
+
+/// API keys of AI providers, keyed by provider id.
+public struct AIKeyStore: Sendable {
+    /// Posted after a key is stored or removed, so cached suggestion sources pick the new key up.
+    public static let didChangeNotification = Notification.Name("FoxlumeQuery.AIKeyStore.didChange")
+    public let store: CredentialStore
+
+    public init(store: CredentialStore) {
+        self.store = store
+    }
+
+    static func account(_ providerID: UUID) -> String { "ai." + providerID.uuidString }
+
+    public func apiKey(for providerID: UUID) -> String? {
+        guard let key = store.secret(account: Self.account(providerID)), !key.isEmpty else { return nil }
+        return key
+    }
+
+    /// An empty key removes the stored one.
+    public func setAPIKey(_ key: String, for providerID: UUID) throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            store.deleteSecret(account: Self.account(providerID))
+        } else {
+            try store.setSecret(trimmed, account: Self.account(providerID))
+        }
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
+    }
+
+    public func deleteAPIKey(for providerID: UUID) {
+        store.deleteSecret(account: Self.account(providerID))
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
+    }
 }
 
 public struct KeychainError: Error, LocalizedError {
@@ -40,11 +82,25 @@ public struct KeychainError: Error, LocalizedError {
 }
 
 public struct KeychainCredentialStore: CredentialStore {
-    private let service = "com.foxlume.query.connection"
-    /// Where passwords were kept while the app was called EasyQuery; read once and copied over.
-    private let legacyService = "com.easyquery.app.connection"
+    public static let connectionService = "com.foxlume.query.connection"
+    /// AI provider API keys.
+    public static let aiService = "com.foxlume.query.ai"
 
-    public init() {}
+    public let service: String
+    /// Where passwords were kept while the app was called EasyQuery; read once and copied over.
+    private let legacyService: String?
+    private let label: String
+
+    public init() {
+        self.init(service: Self.connectionService, legacyService: "com.easyquery.app.connection", label: "Foxlume Query connection")
+    }
+
+    /// A store on its own Keychain service, such as the AI keys or a test service.
+    public init(service: String, legacyService: String? = nil, label: String) {
+        self.service = service
+        self.legacyService = legacyService
+        self.label = label
+    }
 
     private func query(for account: String, service: String? = nil) -> [String: Any] {
         [
@@ -56,7 +112,7 @@ public struct KeychainCredentialStore: CredentialStore {
 
     public func secret(account: String) -> String? {
         if let current = read(account: account, service: service) { return current }
-        guard let legacy = read(account: account, service: legacyService) else { return nil }
+        guard let legacyService, let legacy = read(account: account, service: legacyService) else { return nil }
         try? setSecret(legacy, account: account)
         return legacy
     }
@@ -76,7 +132,7 @@ public struct KeychainCredentialStore: CredentialStore {
         if status == errSecItemNotFound {
             var item = query(for: account)
             item[kSecValueData as String] = data
-            item[kSecAttrLabel as String] = "Foxlume Query connection"
+            item[kSecAttrLabel as String] = label
             item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
             let addStatus = SecItemAdd(item as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw KeychainError(status: addStatus) }
@@ -87,7 +143,7 @@ public struct KeychainCredentialStore: CredentialStore {
 
     public func deleteSecret(account: String) {
         SecItemDelete(query(for: account) as CFDictionary)
-        SecItemDelete(query(for: account, service: legacyService) as CFDictionary)
+        if let legacyService { SecItemDelete(query(for: account, service: legacyService) as CFDictionary) }
     }
 }
 

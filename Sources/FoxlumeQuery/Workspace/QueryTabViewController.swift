@@ -53,6 +53,12 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
     private(set) var fileURL: URL?
     /// The database and schema the editor's suggestions were made for.
     private var completionScope = ""
+    /// Inline AI suggestions: the source in use and the toolbar line that reports on it (QueryTabViewController+AI.swift).
+    let inlineSourceCache = InlineSuggestionSourceCache()
+    let aiStatusView = InlineSuggestionStatusView()
+    /// The Ask prompt shown above the editor.
+    let aiConsentBar = AIConsentBar()
+    private(set) lazy var aiGate = makeInlineSuggestionGate()
 
     init(workspace: ConnectionWorkspace, title: String, sql: String, fileURL: URL? = nil) {
         self.workspace = workspace
@@ -85,13 +91,14 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         formatButton.isHidden = !workspace.kind.isSQL
         saveQueryButton.setAccessibilityIdentifier("addToSavedQueries")
         let viewControls = viewEditorControls()
-        let toolbar = UI.hstack(viewControls.leading + [runButton, runAllButton, stopButton, explainControl, UI.separator(vertical: true), formatButton, saveQueryButton, UI.flexibleSpace(), viewControls.trailing ?? limitLabel], spacing: 6)
+        let toolbar = UI.hstack(viewControls.leading + [runButton, runAllButton, stopButton, explainControl, UI.separator(vertical: true), formatButton, saveQueryButton, UI.flexibleSpace(), aiStatusView, viewControls.trailing ?? limitLabel], spacing: 6)
         let toolbarContainer = NSView()
         toolbarContainer.translatesAutoresizingMaskIntoConstraints = false
         toolbarContainer.addSubviewFilling(toolbar, insets: NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10))
 
         editor.completionProvider = self
         editor.language = workspace.queryLanguage
+        editor.inlineSuggestionHost = self
         // Columns load in the background so the first suggestions can already name them (spec 3.7).
         workspace.preloadCompletionColumns()
         completionScope = workspaceCompletionScope
@@ -173,8 +180,27 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
         let toolbarLine = UI.separator()
         editorPane.addSubview(toolbarContainer)
         editorPane.addSubview(toolbarLine)
-        editorPane.addSubview(editor)
+        // The AI Ask prompt sits between the toolbar and the editor while it is shown.
+        let editorColumn = NSStackView(views: [aiConsentBar, editor])
+        editorColumn.orientation = .vertical
+        editorColumn.spacing = 0
+        editorColumn.alignment = .leading
+        editorColumn.distribution = .fill
+        editor.setContentHuggingPriority(.defaultLow, for: .vertical)
+        aiConsentBar.isHidden = true
+        configureConsentBar()
+        editorPane.addSubview(editorColumn)
+        editorColumn.translatesAutoresizingMaskIntoConstraints = false
         editor.translatesAutoresizingMaskIntoConstraints = false
+        aiConsentBar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            aiConsentBar.widthAnchor.constraint(equalTo: editorColumn.widthAnchor),
+            editor.widthAnchor.constraint(equalTo: editorColumn.widthAnchor),
+            editorColumn.topAnchor.constraint(equalTo: toolbarLine.bottomAnchor),
+            editorColumn.leadingAnchor.constraint(equalTo: editorPane.leadingAnchor),
+            editorColumn.trailingAnchor.constraint(equalTo: editorPane.trailingAnchor),
+            editorColumn.bottomAnchor.constraint(equalTo: editorPane.bottomAnchor),
+        ])
         NSLayoutConstraint.activate([
             toolbarContainer.topAnchor.constraint(equalTo: editorPane.topAnchor),
             toolbarContainer.leadingAnchor.constraint(equalTo: editorPane.leadingAnchor),
@@ -182,10 +208,6 @@ final class QueryTabViewController: NSViewController, WorkspaceTabContent {
             toolbarLine.topAnchor.constraint(equalTo: toolbarContainer.bottomAnchor),
             toolbarLine.leadingAnchor.constraint(equalTo: editorPane.leadingAnchor),
             toolbarLine.trailingAnchor.constraint(equalTo: editorPane.trailingAnchor),
-            editor.topAnchor.constraint(equalTo: toolbarLine.bottomAnchor),
-            editor.leadingAnchor.constraint(equalTo: editorPane.leadingAnchor),
-            editor.trailingAnchor.constraint(equalTo: editorPane.trailingAnchor),
-            editor.bottomAnchor.constraint(equalTo: editorPane.bottomAnchor),
         ])
 
         split.isVertical = false

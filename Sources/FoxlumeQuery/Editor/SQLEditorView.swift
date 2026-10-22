@@ -78,6 +78,10 @@ final class SQLEditorView: NSView {
     weak var completionProvider: SQLCompletionProvider? {
         didSet { textView.completionProvider = completionProvider }
     }
+    /// Inline (AI) suggestions; nil for editors that never show them.
+    weak var inlineSuggestionHost: InlineSuggestionHost? {
+        didSet { textView.inlineSuggestions.host = inlineSuggestionHost }
+    }
 
     var string: String {
         get { textView.string }
@@ -210,6 +214,8 @@ final class SQLEditorView: NSView {
 
 final class SQLTextView: NSTextView {
     weak var completionProvider: SQLCompletionProvider?
+    /// The grey suggestion after the caret and the requests behind it.
+    private(set) lazy var inlineSuggestions = InlineSuggestionManager(textView: self)
     var onChange: (() -> Void)?
     private var highlightWork: DispatchWorkItem?
     /// Decides highlighting rules; set before text is shown.
@@ -274,6 +280,7 @@ final class SQLTextView: NSTextView {
 
     func didReplaceText() {
         endCompletionSession()
+        inlineSuggestions.dismiss()
         scheduleHighlight(immediately: true)
         rebuildStatementMap()
         onChange?()
@@ -408,7 +415,9 @@ final class SQLTextView: NSTextView {
         needsDisplay = true
         updateStatementBand()
         // Edits handle the list once they finish; a plain caret move re-filters it or closes it (spec 1.5).
-        guard completionSession != nil, !editingText, !isProgrammaticEdit, typedInsertDepth == 0, !hasMarkedText() else { return }
+        guard !editingText, !isProgrammaticEdit, typedInsertDepth == 0, !hasMarkedText() else { return }
+        inlineSuggestions.caretDidMove(to: selectedRange())
+        guard completionSession != nil else { return }
         refilterCompletionSession()
     }
 
@@ -422,6 +431,7 @@ final class SQLTextView: NSTextView {
         if resigned {
             needsDisplay = true
             endCompletionSession()
+            inlineSuggestions.dismiss()
         }
         return resigned
     }
@@ -429,6 +439,7 @@ final class SQLTextView: NSTextView {
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow !== window {
             endCompletionSession()
+            inlineSuggestions.dismiss()
             stopObservingCompletionContext()
         }
         super.viewWillMove(toWindow: newWindow)
@@ -546,6 +557,12 @@ final class SQLTextView: NSTextView {
         if chord == .control, Int(event.keyCode) == kVK_Space {
             return toggleCompletions()
         }
+        if inlineSuggestions.ghost != nil, !isShowingCompletions, !hasMarkedText() {
+            // Tab and Escape act on the grey suggestion only while no list is open; with one, they keep their meaning.
+            if chord.isEmpty, Int(event.keyCode) == kVK_Tab { return acceptInlineSuggestion(wordOnly: false) }
+            if chord.isEmpty, Int(event.keyCode) == kVK_Escape { return inlineSuggestions.dismiss() }
+            if chord == .option, Int(event.keyCode) == kVK_RightArrow { return acceptInlineSuggestion(wordOnly: true) }
+        }
         // IME composition and every Cmd/Ctrl/Option chord stay with the editor (⌘↩ runs, ⌥↑ moves lines).
         guard chord.isEmpty, !hasMarkedText() else { return super.keyDown(with: event) }
         if isShowingCompletions {
@@ -553,7 +570,10 @@ final class SQLTextView: NSTextView {
             case kVK_DownArrow: return completionPopup.moveSelection(by: 1)
             case kVK_UpArrow: return completionPopup.moveSelection(by: -1)
             case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Tab: return acceptSelectedCompletion()
-            case kVK_Escape: return endCompletionSession()
+            case kVK_Escape:
+                endCompletionSession()
+                // The list is gone: an AI suggestion may follow after the usual pause.
+                return inlineSuggestions.scheduleAfterEdit()
             default: break
             }
         } else if Int(event.keyCode) == kVK_Escape {
@@ -577,12 +597,18 @@ final class SQLTextView: NSTextView {
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
         guard !isProgrammaticEdit else { return super.insertText(string, replacementRange: replacementRange) }
+        let typed = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        let target = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
+        // Typing what the grey suggestion shows keeps the rest of it; anything else dismisses it.
+        let continuesGhost = typedInsertDepth == 0 && !hasMarkedText() && inlineSuggestions.continues(with: typed, selection: target)
+        if typedInsertDepth == 0, !continuesGhost { inlineSuggestions.dismiss() }
         typedInsertDepth += 1
         super.insertText(string, replacementRange: replacementRange)
         typedInsertDepth -= 1
-        let typed = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
         guard typedInsertDepth == 0, let last = typed.last else { return }
-        didType(last)
+        let usedUp = continuesGhost && inlineSuggestions.advance(by: typed, accepted: false)
+        didType(last, opensCompletions: !continuesGhost || usedUp)
+        if !continuesGhost || usedUp { inlineSuggestions.scheduleAfterEdit() }
     }
 
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
@@ -602,18 +628,24 @@ final class SQLTextView: NSTextView {
         updateStatementBand()
         onChange?()
         // Deletions, cuts and undo re-filter an open list (Backspace widens it) but never open one.
-        guard completionSession != nil, !isProgrammaticEdit, typedInsertDepth == 0, !hasMarkedText() else { return }
+        guard !isProgrammaticEdit, typedInsertDepth == 0, !hasMarkedText() else { return }
+        inlineSuggestions.dismiss()
+        inlineSuggestions.scheduleAfterEdit()
+        guard completionSession != nil else { return }
         refilterCompletionSession()
     }
 
     /// After a typed insertion (spec 1.1, 1.5, 5.4).
-    private func didType(_ character: Character) {
+    private func didType(_ character: Character, opensCompletions: Bool = true) {
         if Self.isWordBoundary(character) {
             rewriteKeywordCase(wordEndingAt: selectedRange().location - character.utf16.count)
         }
         guard !hasMarkedText() else { return }
         if completionSession != nil, refilterCompletionSession() { return }
-        if isCompletionTrigger(character) {
+        // A keystroke that continues the grey suggestion leaves it on screen instead of opening a list over it.
+        if !opensCompletions {
+            completionRequest?.cancel()
+        } else if isCompletionTrigger(character) {
             if completionProvider?.completesWhileTyping == true { requestCompletions(manual: false) }
         } else if !tokenRule.continues(with: character) {
             // Leaving the token without a trigger (`=`, `;`) never opens a list, not even one already asked for.
@@ -661,6 +693,8 @@ final class SQLTextView: NSTextView {
         let anchor = completionAnchor(at: session.anchor, in: window)
         session.caretRect = anchor.caretRect
         completionSession = session
+        // The list and a grey suggestion never show together.
+        inlineSuggestions.dismiss()
         completionPopup.show(session.result.items, owner: self, anchor: anchor, parent: window)
     }
 
@@ -724,6 +758,8 @@ final class SQLTextView: NSTextView {
         }
         isProgrammaticEdit = false
         breakUndoCoalescing()
+        // The list closed with its item in place: an AI suggestion may follow after the usual pause.
+        inlineSuggestions.scheduleAfterEdit()
     }
 
     private var canShowCompletions: Bool {
@@ -790,6 +826,65 @@ final class SQLTextView: NSTextView {
     @objc private func completionContextLost(_ notification: Notification) {
         guard completionSession != nil || completionRequest != nil else { return }
         endCompletionSession()
+    }
+
+    // MARK: Inline suggestions
+
+    /// The Suggest command (⌥\): asks the AI source now, wherever the caret is.
+    @objc func suggestInline(_ sender: Any?) {
+        guard let host = inlineSuggestions.host, host.inlineSuggestionSource != nil || host.inlineSuggestionAwaitsConsent else { return NSSound.beep() }
+        endCompletionSession()
+        inlineSuggestions.requestNow()
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(suggestInline(_:)) {
+            guard let host = inlineSuggestions.host else { return false }
+            return isEditable && (host.inlineSuggestionSource != nil || host.inlineSuggestionAwaitsConsent)
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    /// Whether a suggestion may be asked for and shown now: the editor has focus, nothing is selected or being
+    /// composed, no list is open and, after typing, the caret is at the end of a line or before whitespace or a
+    /// closing bracket.
+    func canRequestInlineSuggestion(manual: Bool) -> Bool {
+        guard isEditable, canShowCompletions, !hasMarkedText(), !isShowingCompletions, completionSession == nil else { return false }
+        let selection = selectedRange()
+        guard selection.length == 0 else { return false }
+        let text = string as NSString
+        guard !manual else { return true }
+        guard text.length > 0, !string.allSatisfy(\.isWhitespace) else { return false }
+        guard selection.location < text.length else { return true }
+        let next = text.character(at: selection.location)
+        // Whitespace, newlines and closing brackets.
+        return [9, 10, 13, 32, 41, 93, 125].contains(next)
+    }
+
+    /// Inserts the whole grey suggestion, or its next word, as one undo step.
+    func acceptInlineSuggestion(wordOnly: Bool) {
+        guard let ghost = inlineSuggestions.ghost, selectedRange() == NSRange(location: ghost.location, length: 0) else { return }
+        let piece = wordOnly ? InlineSuggestionManager.nextWord(of: ghost.text) : ghost.text
+        guard !piece.isEmpty else { return }
+        inlineSuggestions.cancelPending()
+        breakUndoCoalescing()
+        isProgrammaticEdit = true
+        insertText(piece, replacementRange: selectedRange())
+        isProgrammaticEdit = false
+        breakUndoCoalescing()
+        undoManager?.setActionName("Accept Suggestion")
+        inlineSuggestions.advance(by: piece, accepted: true)
+        scrollRangeToVisible(selectedRange())
+    }
+
+    /// The ghost changed: redraw where it was and where it is.
+    func inlineSuggestionDidChange() {
+        setNeedsDisplay(visibleRect)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        drawInlineSuggestion(in: dirtyRect)
     }
 
     // MARK: Keyword case
@@ -902,6 +997,7 @@ final class SQLTextView: NSTextView {
         "space": (kVK_Space, " ", []),
         "backspace": (kVK_Delete, "\u{7F}", []),
         "ctrl-space": (kVK_Space, " ", [.control]),
+        "option-right": (kVK_RightArrow, "\u{F703}", [.option, .function, .numericPad]),
     ]
 
     /// Sends a named key through keyDown, the path the keyboard takes. False for an unknown name.

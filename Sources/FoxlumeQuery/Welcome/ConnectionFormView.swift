@@ -263,7 +263,18 @@ struct ConnectionFormView: View {
                     Text(model.config.safeModeLevel.summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Picker("AI suggestions", selection: $model.config.aiPolicyLevel) {
+                        ForEach(AIPolicy.allCases, id: \.self) { policy in
+                            Text(policy.title).tag(policy)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("aiPolicy")
+                    Text(aiPolicyNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                .id("safety")
 
                 if model.testState != .idle {
                     Section {
@@ -306,6 +317,23 @@ struct ConnectionFormView: View {
         }
         .frame(width: 520)
         .frame(minHeight: 520)
+    }
+
+    private var aiPolicyNote: String {
+        let config = model.config
+        var note: String
+        switch config.aiPolicyLevel {
+        case .allow:
+            note = "Allow: with AI turned on in Settings › AI, the query editor sends the text around the cursor and the schema's names to the AI provider, never row values or connection details."
+        case .ask:
+            note = "Ask: the first suggestion asks whether to allow AI for this connection; nothing is sent before you answer."
+        case .never:
+            note = "Never: AI features send nothing for this connection."
+        }
+        let scope = config.environment == .none ? "connections without an environment" : config.environment.displayName + " connections"
+        note += config.aiPolicy == nil ? " The default for \(scope)." : " Production connections default to Never, others to Ask."
+        if !config.kind.isSQL { note += " MongoDB and Redis editors get no suggestions yet." }
+        return note
     }
 
     private var databasePrompt: String {

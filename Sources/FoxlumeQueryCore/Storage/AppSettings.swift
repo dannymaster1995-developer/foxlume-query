@@ -29,6 +29,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var toolbarTintEnvironments: Set<ConnectionEnvironment> = [.production, .staging]
     /// Paths chosen in Settings › Backup Tools, keyed by `BackupTool.rawValue`; a missing key means "find it".
     public var backupToolPaths: [String: String] = [:]
+    /// Settings › AI; off until the user turns it on.
+    public var ai = AISettings()
 
     public init() {}
 
@@ -78,6 +80,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         darkThemeID = Self.migratedThemeID(try container.decodeIfPresent(String.self, forKey: .darkThemeID)) ?? defaults.darkThemeID
         toolbarTintEnvironments = (try? container.decodeIfPresent(Set<ConnectionEnvironment>.self, forKey: .toolbarTintEnvironments)) ?? defaults.toolbarTintEnvironments
         backupToolPaths = (try? container.decodeIfPresent([String: String].self, forKey: .backupToolPaths)) ?? defaults.backupToolPaths
+        ai = (try? container.decodeIfPresent(AISettings.self, forKey: .ai)) ?? defaults.ai
     }
 }
 

@@ -60,7 +60,7 @@ Navigation and safety:
 - [x] FQ-116 Toolbar tinted with the connection's environment colour
 
 AI in the editor (off by default; nothing leaves the Mac unless the user turns it on):
-- [ ] FQ-120 Inline suggestions: grey ghost text after the caret from an AI provider (OpenAI-compatible, including Ollama and other local models, and Claude), with the schema as context; Tab accepts, Esc dismisses; API keys in the Keychain
+- [x] FQ-120 Inline suggestions: grey ghost text after the caret from an AI provider (OpenAI-compatible, including Ollama and other local models, and Claude), with the schema as context; Tab accepts, Esc dismisses; API keys in the Keychain
 - [ ] FQ-121 GitHub Copilot as a source of inline suggestions: Sign in with GitHub in Settings, the Copilot language server downloaded on first use at a pinned version and checksum, telemetry off by default
 
 Quality and release:

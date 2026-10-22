@@ -76,6 +76,7 @@ Run it without arguments for every option, including SSH and TLS settings.
 |---|---|
 | Connections, settings, history, saved queries, filter presets, ER diagram layouts, grid column layouts, sidebar favourites and recents, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
 | Database and SSH passwords, TLS key passphrases | macOS Keychain, service `com.foxlume.query.connection` |
+| AI provider API keys | macOS Keychain, service `com.foxlume.query.ai` |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder (passwords in a file readable only by you). `scripts/run-portable.sh` starts the app this way.
 
@@ -104,10 +105,16 @@ Sources/
     Theme/              built-in themes, VS Code theme import, environment tint colors for windows
     Export/ Import/     result and table export (CSV, JSON, NDJSON, SQL, XLSX), CSV / JSON / XLSX import, SQL file runner,
                         ZIP reader and writer (stored, deflated, ZIP64) for XLSX
+    AI/                 inline AI suggestions: Settings › AI and the per-connection policy, the prompt (text around the caret,
+                        dialect, schema context), request building and response parsing for OpenAI-compatible and Anthropic
+                        APIs, the URLSession client and error mapping, answer clean-up, and the InlineSuggestionSource protocol
+                        with its chat API implementation (tests stub the network with a URLProtocol; no real provider is called)
     Backup/             Backup and Restore with the user's pg_dump, pg_restore, psql, mysqldump and mysql: tool discovery and
                         versions, command lines (TLS, SSH tunnel), private password and client key files, backup file
                         detection, process-group runner
   FoxlumeQuery/         the AppKit app
+    Editor/             SQL editor, completion list, inline suggestion manager (debounce, cancellation, accept), grey text
+                        and the Ask prompt of the per-connection AI policy
   fqprobe/              driver probe CLI
 Tests/                  FoxlumeQueryCoreTests and FoxlumeQueryAppTests
 scripts/                build, environment, test servers, test certificates, sample data

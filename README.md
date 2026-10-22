@@ -41,6 +41,14 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **See which statement runs.** The statement under the cursor is shaded in colors taken from your editor theme, built-in or imported. Word wrap can be turned off (View › Word Wrap, ⌥Z) to scroll long lines sideways; both are in Settings › SQL Editor.
 - **Open Quickly (⇧⌘O).** One fuzzy search across tables, views, functions, databases, saved queries and history.
 
+### AI suggestions (off by default)
+
+<img src="docs/images/ai-inline-suggestion.png" alt="The query editor showing a grey three-line AI suggestion after JOIN: the join condition, a WHERE clause and an ORDER BY clause" width="820">
+
+- **Inline suggestions in the SQL editor.** Pause while typing and the next part of your query appears in grey after the cursor. Tab accepts it, ⌥→ takes one word, Esc dismisses it, and Query › Suggest with AI (⌥\\) asks at once. Works in the SQL editor of every SQL engine; MongoDB and Redis editors are not supported yet.
+- **Bring your own provider.** Any OpenAI-compatible API (OpenAI, OpenRouter, Gemini, or a local model in Ollama or LM Studio) or Anthropic's Claude, set up in Settings › AI with Fetch Models and Test. API keys are kept in the macOS Keychain.
+- **Private by default.** AI is off until you turn it on and add a provider. Only the text around the cursor, the database engine's name and, unless you turn it off, table and column names, types and keys are sent: never row values, query results or connection details. Each connection has an AI setting: Allow, Ask or Never. New connections ask the first time, and nothing is sent before you answer; Production connections default to Never. See [What does AI send?](#faq)
+
 ### Browse and edit data
 
 - **A fast grid** with server-side paging, sorting on several columns (Shift-click) and filters: between, regex, IN, match case, and saved presets.
@@ -194,6 +202,8 @@ The most used ones:
 | ⇧⌘L | Format SQL |
 | ⌥⌘E / ⌃⌘E | Explain / Explain Analyze |
 | ⌃Space | Show completions |
+| ⌥\ | Suggest with AI (when AI is on) |
+| Tab / ⌥→ / Esc | Accept the grey AI suggestion / take its next word / dismiss it |
 | ⌘D | Add the query (or the selection) to Saved Queries |
 | ⇧⌘O | Open Quickly (⌘1 … ⌘5 pick its scope, ⌘↩ opens in a new tab) |
 | ⌘S | Save (staged truncates and drops, grid edits, or the SQL file) |
@@ -239,7 +249,13 @@ Yes. Every release on the [releases page](https://github.com/dannymaster1995-dev
 <details>
 <summary><b>Where are my connections and passwords stored?</b></summary>
 
-Connections, settings, history and saved queries are in `~/Library/Application Support/Foxlume Query/`. Passwords and TLS key passphrases are in the macOS Keychain. For a portable setup, set `FOXLUME_DATA_DIR=/some/folder` (or use `scripts/run-portable.sh`), and everything, passwords included, is kept in that folder.
+Connections, settings, history and saved queries are in `~/Library/Application Support/Foxlume Query/`. Passwords, TLS key passphrases and AI provider API keys are in the macOS Keychain. For a portable setup, set `FOXLUME_DATA_DIR=/some/folder` (or use `scripts/run-portable.sh`), and everything, passwords included, is kept in that folder.
+</details>
+
+<details>
+<summary><b>What does AI send?</b></summary>
+
+Nothing until you turn on AI features in Settings › AI and add a provider. Then, for a suggestion, Foxlume Query sends the active provider only: up to 2,000 characters of the query editor before the cursor and 500 after it, the database engine's name and, when Include schema is on (the default), the names and types of up to 20 tables (a setting) and their columns, with primary keys, NOT NULL and foreign keys. It never sends row values, query results, connection details, host names or passwords. Requests go straight from your Mac to the provider you set up; with a local server such as Ollama or LM Studio nothing leaves your Mac. What the provider does with it is governed by that provider's terms. API keys are kept in the macOS Keychain (in portable mode, in the data folder's private credentials file). Each connection has an AI setting: Allow, Ask or Never. New connections ask the first time a suggestion would be requested (Allow, Not Now or Never), and nothing is sent before you answer; Production connections default to Never, and Never sends nothing. MongoDB and Redis editors send nothing.
 </details>
 
 <details>

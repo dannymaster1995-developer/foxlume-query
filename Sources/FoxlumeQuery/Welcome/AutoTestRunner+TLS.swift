@@ -7,8 +7,8 @@ import FoxlumeQueryCore
 ///                               (disable|prefer|require|verifyCA|verifyFull), ca, cert, key, p12, secret,
 ///                               safemode (a SafeModeLevel raw value), querytimeout (seconds, empty for no limit),
 ///                               startup (Run on connect; `\n` starts a new line); an empty value clears a path
-///     tlsscroll [result|advanced] scrolls the form to the SSL/TLS section (or to the Test Connection result, or
-///                               to the Advanced section)
+///     tlsscroll [result|advanced|safety] scrolls the form to the SSL/TLS section (or to the Test Connection
+///                               result, the Advanced section or Appearance & Safety)
 ///     formsize <width>x<height> resizes the form window
 ///     tlsstate                  logs the mode, the paths, the file checks and the validation message
 ///     tlstest                   presses Test Connection and logs the result when it arrives
@@ -31,7 +31,7 @@ extension AutoTestRunner {
             try Self.set(field, parts.count > 1 ? parts[1] : "", on: model)
             try await Task.sleep(nanoseconds: 300_000_000)
         case "tlsscroll":
-            model.scrollTarget = ["result", "advanced"].contains(argument) ? argument : "tls"
+            model.scrollTarget = ["result", "advanced", "safety"].contains(argument) ? argument : "tls"
             try await Task.sleep(nanoseconds: 500_000_000)
         case "formsize":
             let size = argument.split(separator: "x").compactMap { Double($0) }

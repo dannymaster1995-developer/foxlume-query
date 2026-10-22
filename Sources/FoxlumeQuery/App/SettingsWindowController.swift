@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var settings = AppEnvironment.settings
     @State private var themes = ThemeStore.shared.themes
     @State private var importMessage: String?
+    @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
         Form {
@@ -102,6 +103,8 @@ struct SettingsView: View {
                 Toggle("Confirm UPDATE and DELETE without WHERE", isOn: $settings.confirmUnboundedWrites)
             }
             BackupToolsSection(settings: $settings)
+            AISettingsSection(settings: $settings)
+                .id(SettingsSection.ai)
             Section("Storage") {
                 LabeledContent("Data folder") {
                     Text(AppPaths.dataDirectory.path)
@@ -121,6 +124,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+        .modifier(FormScroller(target: $navigation.target))
         .frame(width: 520)
         .frame(minHeight: 520)
         .onChange(of: settings) { newValue in
@@ -232,5 +236,15 @@ final class SettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    /// Opens Settings scrolled to `section` (see `SettingsSection`).
+    func show(section: String) {
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        // The form must be on screen before it can scroll.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            SettingsNavigation.shared.target = section
+        }
     }
 }

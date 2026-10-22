@@ -147,6 +147,9 @@ public struct ConnectionConfig: Codable, Hashable, Sendable, Identifiable {
     /// SQL run on every new session of a SQL connection ("Run on connect"), such as `SET search_path TO app, public;`.
     /// Nil when empty, and for connections saved before it existed.
     public var startupCommands: String?
+    /// Whether AI features may send anything for this connection; nil follows the environment (see `aiPolicyLevel`).
+    /// Optional so connections saved before it existed still decode.
+    public var aiPolicy: AIPolicy?
 
     /// `queryTimeout` when it limits anything: a positive number of seconds on a SQL engine.
     public var effectiveQueryTimeout: Int? {

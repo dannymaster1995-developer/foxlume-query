@@ -6,6 +6,8 @@ import FoxlumeQueryCore
 enum AppEnvironment {
     static let connections = ConnectionStore()
     static let credentials: CredentialStore = CredentialStores.makeDefault()
+    /// AI provider API keys: their own Keychain service, or the portable credentials file.
+    static let aiKeys = AIKeyStore(store: CredentialStores.makeAIDefault())
     static let history = QueryHistoryStore()
     static let savedQueries = SavedQueryStore()
     static let filterPresets = FilterPresetStore()
