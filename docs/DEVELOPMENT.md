@@ -74,7 +74,7 @@ Run it without arguments for every option, including SSH and TLS settings.
 
 | Data | Location |
 |---|---|
-| Connections, settings, history, saved queries, filter presets, ER diagram layouts, grid column layouts, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
+| Connections, settings, history, saved queries, filter presets, ER diagram layouts, grid column layouts, sidebar favourites and recents, open tabs, imported themes, SSH known hosts | `~/Library/Application Support/Foxlume Query/` |
 | Database and SSH passwords, TLS key passphrases | macOS Keychain, service `com.foxlume.query.connection` |
 
 Portable mode: set `FOXLUME_DATA_DIR=/some/folder` and everything, passwords included, is kept in that folder (passwords in a file readable only by you). `scripts/run-portable.sh` starts the app this way.

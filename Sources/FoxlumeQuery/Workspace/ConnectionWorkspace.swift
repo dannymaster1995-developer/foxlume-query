@@ -17,6 +17,8 @@ final class ConnectionWorkspace {
     private(set) var currentSchema: String?
     private(set) var tables: [TableInfo] = []
     private(set) var isLoadingTables = false
+    /// The table list of the browsed database and schema was read, so a name missing from it is gone.
+    private(set) var hasLoadedTables = false
     /// Keys of the current database for engines with a key tree (Redis).
     private(set) var keyListing: KeyListing?
     static let keyTreeLimit = 50_000
@@ -144,6 +146,7 @@ final class ConnectionWorkspace {
             }
             let schema = currentSchema
             tables = try await session.run { try $0.tables(schema: schema) }
+            hasLoadedTables = true
             if case .keyPattern = capabilities.browseFilterStyle {
                 keyListing = try await session.browseKeys(pattern: "*", limit: Self.keyTreeLimit)
             }
@@ -183,6 +186,7 @@ final class ConnectionWorkspace {
         try await applyReadOnly()
         currentSchema = nil
         tables = []
+        hasLoadedTables = false
         await refreshMetadata()
     }
 
@@ -191,6 +195,7 @@ final class ConnectionWorkspace {
         completionCatalog.stopPreload()
         currentSchema = name
         tables = []
+        hasLoadedTables = false
         await refreshMetadata()
     }
 

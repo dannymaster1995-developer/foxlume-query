@@ -48,6 +48,7 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 - **Editors that know the column type:** booleans are check boxes (Space or a click toggles them), dates and times open a date picker with Now and NULL, enum columns (PostgreSQL enum types, MySQL and MariaDB `ENUM`) list their values, and foreign key columns offer a searchable list of the referenced rows. Typing a value by hand always works too.
 - **Arrange columns:** drag to reorder, hide columns or pick them from a checklist, size them to fit (or double-click a divider), and jump to a column by typing its name (⌃⌘J). Each table remembers its column order, widths and hidden columns.
 - **Look inside values:** View Value (⌥↩) shows JSON as a tree you can filter, with Copy Value and Copy Path (`$.items[2].name`); previews images and PDFs stored in binary columns (PNG, JPEG, GIF, WebP, HEIC, TIFF, BMP) with Save As for the original bytes; and dumps any binary value as offset, hex and ASCII, fast even for blobs of many megabytes.
+- **Favourites and Recent** at the top of the sidebar: star a table, view, collection, function, procedure, trigger or type (the star at the end of its row, its context menu or ⌥⌘B) and it stays one click away for that connection; Recent lists the last ten tables and views you opened. Rows from another database or schema are labelled and switch the database when opened, favourites can be dragged into order, and they follow renamed tables, schemas and databases.
 - **Follow foreign keys** with one click, inspect a row in the Row Inspector (⌥⌘I), and find text in results or across the whole table.
 
 ### Understand your queries
@@ -202,6 +203,7 @@ The most used ones:
 | ⌥⌘↑ / ⌥⌘↓ | First / last page; in the structure editor's column list, move the selected columns up / down |
 | ⌘R / ⇧⌘R | Reload data / reload table list |
 | ⌘K | Switch database |
+| ⌥⌘B | Add to or remove from Favourites |
 | ⌥⌘A | Server Activity (sessions and slow queries) |
 | ⌥⌘1 / ⌥⌘2 | Data / Structure |
 | ⌘Y | Query history |

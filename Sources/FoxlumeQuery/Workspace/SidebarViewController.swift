@@ -39,6 +39,9 @@ final class SidebarViewController: NSViewController {
     var onBackup: ((BackupRequest) -> Void)?
     /// Restore… from the empty area.
     var onRestore: (() -> Void)?
+    /// A Favourites or Recent row was opened; the window switches database first when needed. See
+    /// SidebarViewController+Favourites.swift.
+    var onOpenItem: ((SidebarItemRef, _ newTab: Bool) -> Void)?
 
     private let filterField = NSSearchField()
     private let schemaPopup = ContextMenuPopUpButton()
@@ -56,6 +59,9 @@ final class SidebarViewController: NSViewController {
         var objectKind: SchemaObjectKind?
         var objects: [SchemaObjectBox] = []
         var note: SidebarNote?
+        /// Favourites or Recent, above the tables.
+        var section: FavouritesStore.Section?
+        var shortcuts: [ShortcutBox] = []
         init(title: String, items: [TableInfo], keyRoots: [KeyNode]? = nil) {
             self.title = title
             self.items = items
@@ -63,11 +69,13 @@ final class SidebarViewController: NSViewController {
         }
 
         var childCount: Int {
+            if section != nil { return shortcuts.count }
             if objectKind != nil { return objects.isEmpty ? (note == nil ? 0 : 1) : objects.count }
             return keyRoots?.count ?? items.count
         }
 
         var headerCount: Int {
+            if section != nil { return shortcuts.count }
             if objectKind != nil { return objects.count }
             return keyRoots == nil ? items.count : keyCount
         }
@@ -78,6 +86,10 @@ final class SidebarViewController: NSViewController {
     var collapsedGroups: Set<String> = Set(SchemaObjectKind.allCases.map(\.title))
     /// Set while `reload` expands groups, so those expansions are not taken for the user's.
     var isRestoringExpansion = false
+    /// A reload asked for by a change of the favourites store, run once after the double-click interval so rows do
+    /// not move between the two clicks.
+    var isReloadScheduled = false
+    var shortcutBoxes: [String: ShortcutBox] = [:]
 
     init(workspace: ConnectionWorkspace) {
         self.workspace = workspace
@@ -124,6 +136,9 @@ final class SidebarViewController: NSViewController {
         outline.menu = NSMenu()
         outline.menu?.delegate = self
         outline.setAccessibilityIdentifier("tableList")
+        outline.registerForDraggedTypes([Self.favouriteDragType])
+        outline.setDraggingSourceOperationMask(.move, forLocal: true)
+        outline.onHoverChange = { [weak self] old, new in self?.hoverChanged(from: old, to: new) }
 
         let scroll = NSScrollView()
         scroll.documentView = outline
@@ -171,6 +186,7 @@ final class SidebarViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         NotificationCenter.default.addObserver(self, selector: #selector(metadataChanged), name: ConnectionWorkspace.metadataDidChange, object: workspace)
+        NotificationCenter.default.addObserver(self, selector: #selector(favouritesChanged), name: FavouritesStore.didChangeNotification, object: AppEnvironment.favourites)
         reload()
     }
 
@@ -187,7 +203,7 @@ final class SidebarViewController: NSViewController {
         view.window?.makeFirstResponder(filterField)
     }
 
-    private func reload() {
+    func reload() {
         let selected = selectedTableInfos.map(\.ref)
         schemaPopup.removeAllItems()
         schemaPopup.addItems(withTitles: workspace.schemas)
@@ -207,6 +223,7 @@ final class SidebarViewController: NSViewController {
         ].filter { !$0.items.isEmpty }
         newGroups += objectGroups(filter: filter)
         newGroups += [Group(title: "Databases", items: keyspaces)].filter { !$0.items.isEmpty }
+        newGroups = shortcutGroups(filter: filter) + newGroups
         if let listing = workspace.keyListing {
             let keys = listing.keys.filter { filter.isEmpty || $0.name.lowercased().contains(filter) }
             let group = Group(title: "Keys", items: [], keyRoots: KeyNode.tree(keys, separator: workspace.keySeparator, truncated: listing.truncated, limit: ConnectionWorkspace.keyTreeLimit))
@@ -219,10 +236,12 @@ final class SidebarViewController: NSViewController {
         isRestoringExpansion = true
         for group in groups {
             // While filtering, every group with matches opens; otherwise the user's choice holds.
-            let opens = !collapsedGroups.contains(group.title) || (!filter.isEmpty && group.objectKind != nil && !group.objects.isEmpty)
+            var opens = !collapsedGroups.contains(group.title) || (!filter.isEmpty && group.objectKind != nil && !group.objects.isEmpty)
+            if let section = group.section { opens = !AppEnvironment.favourites.isCollapsed(section) }
             if opens { outline.expandItem(group) }
         }
         isRestoringExpansion = false
+        if outline.hoveredRow >= 0 { hoverChanged(from: -1, to: outline.hoveredRow) }
         if !selected.isEmpty { select(selected) }
         if let selectedObject { select(selectedObject) }
 
@@ -275,7 +294,7 @@ final class SidebarViewController: NSViewController {
     // NSOutlineView needs stable object identity per item.
     private var boxes: [TableRef: TableInfoBox] = [:]
     var objectBoxes: [String: SchemaObjectBox] = [:]
-    private func box(for info: TableInfo) -> TableInfoBox {
+    func box(for info: TableInfo) -> TableInfoBox {
         if let existing = boxes[info.ref], existing.info == info { return existing }
         let box = TableInfoBox(info)
         boxes[info.ref] = box
@@ -298,6 +317,13 @@ final class SidebarViewController: NSViewController {
             open(node, newTab: newTab)
             return
         }
+        if let box = item as? ShortcutBox {
+            // Objects only select on a single click, as in the tree.
+            guard box.row.item.isTableLike, !box.row.isMissing, NSApp.currentEvent?.modifierFlags.contains(.shift) != true,
+                  outline.selectedRowIndexes.count <= 1 else { return }
+            onOpenItem?(box.row.item, newTab)
+            return
+        }
         // Opening an object's source is a round trip, so a single click only selects it, as in TablePro.
         guard let info = (item as? TableInfoBox)?.info else { return }
         // Shift-click extends the selection (for Maintenance) without opening anything.
@@ -313,6 +339,10 @@ final class SidebarViewController: NSViewController {
         }
         if let object = (item as? SchemaObjectBox)?.object {
             onOpenObject?(object)
+            return
+        }
+        if let box = item as? ShortcutBox {
+            if !box.row.isMissing { onOpenItem?(box.row.item, true) }
             return
         }
         guard let info = (item as? TableInfoBox)?.info else { return }
@@ -349,6 +379,10 @@ final class SidebarViewController: NSViewController {
 
     /// Opens the table selected with the keyboard.
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36, let box = outline.item(atRow: outline.selectedRow) as? ShortcutBox {
+            if !box.row.isMissing { onOpenItem?(box.row.item, false) }
+            return
+        }
         if event.keyCode == 36, let table = selectedTable {
             onOpenTable?(table, false)
             return
@@ -360,9 +394,11 @@ final class SidebarViewController: NSViewController {
         super.keyDown(with: event)
     }
 
-    fileprivate var menuTargetInfo: TableInfo? {
+    /// The clicked table, or the table a Favourites or Recent row stands for when it is in the browsed schema.
+    var menuTargetInfo: TableInfo? {
         let row = outline.clickedRow >= 0 ? outline.clickedRow : outline.selectedRow
-        guard let info = (outline.item(atRow: row) as? TableInfoBox)?.info, info.kind != .keyspace else { return nil }
+        let item = outline.item(atRow: row)
+        guard let info = (item as? TableInfoBox)?.info ?? (item as? ShortcutBox).flatMap(resolvedInfo), info.kind != .keyspace else { return nil }
         return info
     }
 
@@ -633,6 +669,7 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         if item == nil { return groups[index] }
         if let node = item as? KeyNode { return node.children[index] }
         guard let group = item as? Group else { return NSNull() }
+        if group.section != nil { return group.shortcuts[index] }
         if group.objectKind != nil {
             if group.objects.isEmpty, let note = group.note { return note }
             return group.objects[index]
@@ -650,7 +687,7 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is TableInfoBox || item is SchemaObjectBox || ((item as? KeyNode)?.isNote == false)
+        item is TableInfoBox || item is SchemaObjectBox || item is ShortcutBox || ((item as? KeyNode)?.isNote == false)
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -662,6 +699,9 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         }
         if let object = item as? SchemaObjectBox {
             return objectCell(object, in: outlineView)
+        }
+        if let shortcut = item as? ShortcutBox {
+            return shortcutCell(shortcut, in: outlineView)
         }
         if let note = item as? SidebarNote {
             return noteCell(note, in: outlineView)
@@ -683,8 +723,10 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
             return cell
         }
         guard let info = (item as? TableInfoBox)?.info else { return nil }
-        let identifier = NSUserInterfaceItemIdentifier("table")
-        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? makeCell(identifier: identifier, withImage: true)
+        let identifier = NSUserInterfaceItemIdentifier("tableRow")
+        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? ObjectCellView ?? makeObjectCell(identifier: identifier)
+        cell.detailField.isHidden = true
+        configureStar(of: cell, for: info.kind == .keyspace ? nil : sidebarItem(info))
         cell.textField?.stringValue = info.kind == .keyspace ? "\(info.name)  (\((info.estimatedRows ?? 0).groupedText))" : info.name
         cell.textField?.textColor = .labelColor
         cell.imageView?.image = Theme.image(Theme.symbol(for: info.kind), info.kind.rawValue)
@@ -755,6 +797,7 @@ extension SidebarViewController: NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        if addDetachedShortcutMenuItems(to: menu) { return }
         if addObjectMenuItems(to: menu) { return }
         func item(_ title: String, _ action: Selector) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -776,6 +819,7 @@ extension SidebarViewController: NSMenuDelegate {
             if onShowERDiagram != nil, workspace.supportsERDiagram {
                 menu.addItem(item("Show in ER Diagram", #selector(menuShowInERDiagram(_:))))
             }
+            if let info = menuTargetInfo { addFavouriteMenuItems(for: sidebarItem(info), to: menu) }
             menu.addItem(.separator())
             menu.addItem(item("Copy Name", #selector(menuCopyName(_:))))
             menu.addItem(item("Copy Definition (DDL)", #selector(menuCopyDDL(_:))))
@@ -880,6 +924,35 @@ final class ContextMenuPopUpButton: NSPopUpButton {
 /// The sidebar list. Shift-click and Shift-arrow select several rows; ⌘-click keeps opening a table in a new tab
 /// instead of toggling it in the selection.
 final class SidebarOutlineView: NSOutlineView {
+    /// The row under the mouse, for the star at the end of table and object rows; -1 when there is none.
+    private(set) var hoveredRow = -1 {
+        didSet { if hoveredRow != oldValue { onHoverChange?(oldValue, hoveredRow) } }
+    }
+    var onHoverChange: ((_ old: Int, _ new: Int) -> Void)?
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        hoveredRow = row(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoveredRow = -1
+    }
+
+    func setHoveredRowForTesting(_ row: Int) {
+        hoveredRow = row
+    }
+
     override func mouseDown(with event: NSEvent) {
         let flags = event.modifierFlags
         guard flags.contains(.command), !flags.contains(.shift),

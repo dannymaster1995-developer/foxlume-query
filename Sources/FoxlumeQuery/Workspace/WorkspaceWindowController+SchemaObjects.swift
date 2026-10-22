@@ -63,8 +63,10 @@ extension WorkspaceWindowController {
                 guard allowed else { return }
                 Task {
                     do {
+                        let database = self.workspace.currentDatabase
                         try await self.workspace.drop(object)
                         self.tabs.closeObjectTabs(object)
+                        try? AppEnvironment.favourites.removeObject(SidebarItemRef(object: object, database: database), connection: self.workspace.config.id)
                     } catch {
                         Alerts.showError(error, title: "Could not drop “\(object.name)”", in: self.window)
                     }

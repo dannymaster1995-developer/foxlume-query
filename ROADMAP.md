@@ -56,7 +56,7 @@ Data in and out:
 - [x] FQ-114 Backup and restore with pg_dump / pg_restore and mysqldump
 
 Navigation and safety:
-- [ ] FQ-115 Recent and favourite tables in the sidebar
+- [x] FQ-115 Recent and favourite tables in the sidebar
 - [ ] FQ-116 Toolbar tinted with the connection's environment colour
 
 AI in the editor (off by default; nothing leaves the Mac unless the user turns it on):

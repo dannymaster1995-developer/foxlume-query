@@ -211,6 +211,7 @@ extension WorkspaceWindowController {
         try? AppEnvironment.erDiagramLayouts.apply(rename)
         try? AppEnvironment.filterPresets.apply(rename)
         AppEnvironment.openQuicklyFrecency.apply(rename)
+        try? AppEnvironment.favourites.apply(rename)
         tabs.retarget(rename)
     }
 

@@ -75,6 +75,7 @@ import AppKit
     @objc optional func jumpToColumn(_ sender: Any?)
     @objc optional func backupDatabase(_ sender: Any?)
     @objc optional func restoreDatabase(_ sender: Any?)
+    @objc optional func toggleFavourite(_ sender: Any?)
 }
 
 @MainActor
@@ -159,6 +160,7 @@ enum MainMenu {
         main.addItem(submenu("Database", [
             item("Switch Database…", #selector(FoxlumeQueryActions.showDatabaseSwitcher(_:)), "k"),
             item("Refresh Table List", #selector(FoxlumeQueryActions.refreshMetadata(_:)), "r", [.command, .shift]),
+            item("Add to Favourites", #selector(FoxlumeQueryActions.toggleFavourite(_:)), "b", [.command, .option]),
             .separator(),
             item("New Table…", #selector(FoxlumeQueryActions.newTable(_:))),
             item("New View…", #selector(FoxlumeQueryActions.newView(_:))),

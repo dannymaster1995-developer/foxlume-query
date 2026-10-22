@@ -39,6 +39,8 @@ public enum AppPaths {
     public static var filterPresetsFile: URL { dataDirectory.appendingPathComponent("filter-presets.json") }
     /// What Open Quickly remembers about recently chosen items, per connection.
     public static var openQuicklyFile: URL { dataDirectory.appendingPathComponent("open-quickly.json") }
+    /// The sidebar's Favourites and Recent sections, per connection.
+    public static var favouritesFile: URL { dataDirectory.appendingPathComponent("favourites.json") }
     /// Table positions arranged in ER diagrams, per connection, database and schema.
     public static var erDiagramLayoutsFile: URL { dataDirectory.appendingPathComponent("er-diagram-layouts.json") }
     /// Column order, widths and hidden columns of table grids, per connection, database, schema and table.

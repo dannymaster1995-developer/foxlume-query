@@ -134,6 +134,7 @@ extension SidebarViewController {
         cell.imageView?.contentTintColor = Self.tint(for: box.object.kind)
         cell.toolTip = box.object.tooltip
         cell.setAccessibilityLabel("\(box.object.kind.label): \(box.label)")
+        configureStar(of: cell, for: sidebarItem(box.object))
         return cell
     }
 
@@ -146,11 +147,13 @@ extension SidebarViewController {
         ])
         cell.imageView?.image = nil
         cell.toolTip = note.text
+        configureStar(of: cell, for: nil)
         return cell
     }
 
     /// The same layout as the table rows: a 16-point icon, then the text.
-    private func makeObjectCell(identifier: NSUserInterfaceItemIdentifier) -> ObjectCellView {
+    /// Also used for table rows and the Favourites and Recent rows, which share the star at the end.
+    func makeObjectCell(identifier: NSUserInterfaceItemIdentifier) -> ObjectCellView {
         let cell = ObjectCellView()
         cell.identifier = identifier
         let text = NSTextField(labelWithString: "")
@@ -167,9 +170,18 @@ extension SidebarViewController {
         detail.setContentHuggingPriority(.required, for: .horizontal)
         let image = NSImageView()
         image.translatesAutoresizingMaskIntoConstraints = false
+        let star = cell.starButton
+        star.translatesAutoresizingMaskIntoConstraints = false
+        star.isBordered = false
+        star.imagePosition = .imageOnly
+        star.setButtonType(.momentaryChange)
+        star.target = self
+        star.action = #selector(starClicked(_:))
+        star.isHidden = true
         cell.addSubview(image)
         cell.addSubview(text)
         cell.addSubview(detail)
+        cell.addSubview(star)
         cell.textField = text
         cell.imageView = image
         NSLayoutConstraint.activate([
@@ -179,8 +191,13 @@ extension SidebarViewController {
             text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
             text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             detail.leadingAnchor.constraint(equalTo: text.trailingAnchor, constant: 6),
-            detail.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+            detail.trailingAnchor.constraint(lessThanOrEqualTo: star.leadingAnchor, constant: -2),
             detail.firstBaselineAnchor.constraint(equalTo: text.firstBaselineAnchor),
+            text.trailingAnchor.constraint(lessThanOrEqualTo: star.leadingAnchor, constant: -2),
+            star.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            star.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            star.widthAnchor.constraint(equalToConstant: 16),
+            star.heightAnchor.constraint(equalToConstant: 16),
         ])
         return cell
     }
@@ -190,19 +207,24 @@ extension SidebarViewController {
     @objc func outlineViewItemDidExpand(_ notification: Notification) {
         guard !isRestoringExpansion, let group = notification.userInfo?["NSObject"] as? Group else { return }
         collapsedGroups.remove(group.title)
+        // Favourites and Recent stay as the user left them, across windows and launches.
+        if let section = group.section { try? AppEnvironment.favourites.setCollapsed(section, false) }
     }
 
     @objc func outlineViewItemDidCollapse(_ notification: Notification) {
         guard !isRestoringExpansion, let group = notification.userInfo?["NSObject"] as? Group else { return }
         collapsedGroups.insert(group.title)
+        if let section = group.section { try? AppEnvironment.favourites.setCollapsed(section, true) }
     }
 
     // MARK: Context menu
 
     private var menuRow: Int { outline.clickedRow >= 0 ? outline.clickedRow : outline.selectedRow }
 
+    /// The clicked object, or the object a Favourites row stands for when it is in the browsed schema.
     fileprivate var menuObject: SchemaObject? {
-        (outline.item(atRow: menuRow) as? SchemaObjectBox)?.object
+        let item = outline.item(atRow: menuRow)
+        return (item as? SchemaObjectBox)?.object ?? (item as? ShortcutBox).flatMap(resolvedObject)
     }
 
     fileprivate var menuObjectGroup: Group? {
@@ -220,6 +242,7 @@ extension SidebarViewController {
         let canWrite = !workspace.isReadOnly
         if let object = menuObject {
             menu.addItem(item(object.kind == .type ? "Show Definition" : "Show DDL", #selector(menuShowObject(_:))))
+            addFavouriteMenuItems(for: sidebarItem(object), to: menu)
             menu.addItem(.separator())
             menu.addItem(item("Copy Name", #selector(menuCopyObjectName(_:))))
             if object.kind.isRoutine, object.arguments != nil {
@@ -299,7 +322,22 @@ extension SidebarViewController {
     }
 }
 
-/// A sidebar row for a routine, trigger or type: the name, and for a trigger its table in small secondary text.
+/// A sidebar row: an icon, the name, small secondary text (a trigger's table, a favourite's database and schema) and
+/// a star at the end, shown filled for favourites and hollow while the mouse is over the row.
 final class ObjectCellView: NSTableCellView {
     let detailField = NSTextField(labelWithString: "")
+    let starButton = NSButton()
+    /// Rows that cannot be favourites (notes, Redis databases) never show the star.
+    var canStar = false { didSet { updateStar() } }
+    var isFavourite = false { didSet { updateStar() } }
+    var isHovered = false { didSet { updateStar() } }
+
+    private func updateStar() {
+        starButton.isHidden = !canStar || !(isFavourite || isHovered)
+        let title = isFavourite ? "Remove from Favourites" : "Add to Favourites"
+        starButton.image = Theme.image(isFavourite ? "star.fill" : "star", title)
+        starButton.contentTintColor = isFavourite ? .systemYellow : .tertiaryLabelColor
+        starButton.toolTip = title
+        starButton.setAccessibilityLabel(title)
+    }
 }

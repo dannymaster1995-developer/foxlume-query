@@ -1,7 +1,8 @@
 import Foundation
 
 /// A schema or database renamed on the server, applied to what the app remembers under its name: grid column
-/// layouts, ER diagram layouts, filter presets, Open Quickly recents and the tables open in tabs.
+/// layouts, ER diagram layouts, filter presets, Open Quickly recents, sidebar favourites and recents and the tables
+/// open in tabs.
 public enum StoredStateRename: Hashable, Sendable {
     /// Schema `from` of `database` (nil when the scopes carry none) became `to`.
     case schema(connectionID: UUID, database: String?, from: String, to: String)
@@ -41,6 +42,16 @@ public enum StoredStateRename: Hashable, Sendable {
     public func renamed(_ scope: FilterPresetScope) -> FilterPresetScope? {
         renamed(connectionID: scope.connectionID, database: scope.database, schema: scope.schema).map {
             FilterPresetScope(connectionID: scope.connectionID, database: $0.database, schema: $0.schema, table: scope.table)
+        }
+    }
+
+    /// A favourite or recent sidebar item under the new database or schema, or nil when the rename does not touch it.
+    public func renamed(_ item: SidebarItemRef, connectionID: UUID) -> SidebarItemRef? {
+        renamed(connectionID: connectionID, database: item.database, schema: item.schema).map {
+            var moved = item
+            moved.database = $0.database
+            moved.schema = $0.schema
+            return moved
         }
     }
 
@@ -97,5 +108,12 @@ extension QuickOpenFrecencyStore {
     /// Moves the visits of renamed items to their new keys.
     public func apply(_ rename: StoredStateRename) {
         renameKeys(connection: rename.connectionID) { rename.renamedQuickOpenKey($0) }
+    }
+}
+
+extension FavouritesStore {
+    /// Moves the favourites and recents of a renamed schema or database to the new name.
+    public func apply(_ rename: StoredStateRename) throws {
+        try moveItems(connection: rename.connectionID) { rename.renamed($0, connectionID: rename.connectionID) }
     }
 }

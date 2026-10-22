@@ -110,11 +110,13 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
         connectSavedQueries()
         connectERDiagram(sidebar)
         connectBackup(sidebar)
+        sidebar.onOpenItem = { [weak self] item, newTab in self?.openSidebarItem(item, newTab: newTab) }
         tabs.onSelectionChange = { [weak self] tab in
             guard let self, let table = tab?.table else { return }
             self.sidebar.select(table)
             // Opening a table counts for Open Quickly's ranking, wherever it was opened from.
             AppEnvironment.openQuicklyFrecency.record(QuickOpenItem.tableKey(table), connection: self.workspace.config.id)
+            self.recordRecent(table)
         }
 
         statusView.onReconnect = { [weak self] in self?.reconnect(nil) }
@@ -188,9 +190,13 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
     }
 
     /// Switches database unless table edits or staged truncates and drops would be lost; table tabs close.
-    /// Used by the toolbar's database menu and by Open Quickly.
-    func requestDatabaseSwitch(to name: String) {
-        guard name != workspace.currentDatabase else { return }
+    /// Used by the toolbar's database menu, Open Quickly and the sidebar's Favourites and Recent; `then` runs once
+    /// the switch is done.
+    func requestDatabaseSwitch(to name: String, then completion: (() -> Void)? = nil) {
+        guard name != workspace.currentDatabase else {
+            completion?()
+            return
+        }
         guard !tabs.hasUnsavedTableEdits, workspace.pendingTableOperations.isEmpty else {
             workspaceChanged()
             Alerts.showError(DatabaseError.unsupported("Save or discard the edits in your open tables and the pending truncates and drops before switching database."), title: "Unsaved changes", in: window)
@@ -200,6 +206,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
             do {
                 try await workspace.switchDatabase(name)
                 tabs.closeTableTabs()
+                completion?()
             } catch {
                 workspaceChanged()
                 Alerts.showError(error, title: "Could not switch database", in: window)
@@ -312,6 +319,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
                 Task {
                     do {
                         try await self.workspace.rename(info.ref, objectKind: info.kind, to: name)
+                        self.favouriteRenamed(info, to: name)
                         let wasOpen = self.tabs.tabs.contains { $0.table == info.ref }
                         self.tabs.closeTabs(showing: info.ref)
                         if wasOpen { self.tabs.openTable(TableRef(schema: info.ref.schema, name: name), newTab: true) }
@@ -352,7 +360,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate {
                 let done = try await workspace.applyPendingTableOperations()
                 for operation in done {
                     switch operation.operation {
-                    case .drop: tabs.closeTabs(showing: operation.table)
+                    case .drop:
+                        tabs.closeTabs(showing: operation.table)
+                        favouriteDropped(operation.table, kind: operation.objectKind)
                     case .truncate: tabs.reloadTabs(showing: operation.table)
                     }
                 }
@@ -535,6 +545,7 @@ extension WorkspaceWindowController: NSMenuItemValidation {
         if let maintenance = validateMaintenanceItem(menuItem) { return maintenance }
         if let activity = validateActivityItem(menuItem) { return activity }
         if let backup = validateBackupItem(menuItem) { return backup }
+        if let favourite = validateFavouriteItem(menuItem) { return favourite }
         let hasOperations = !workspace.pendingTableOperations.isEmpty
         switch menuItem.action {
         case #selector(saveAll(_:)):

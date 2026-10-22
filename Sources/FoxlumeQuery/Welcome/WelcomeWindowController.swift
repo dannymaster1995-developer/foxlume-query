@@ -66,6 +66,7 @@ final class WelcomeModel: ObservableObject {
         // Queries saved for this connection only go with it, as in TablePro; shared ones stay.
         try? AppEnvironment.savedQueries.removeConnection(config.id)
         AppEnvironment.openQuicklyFrecency.removeConnection(config.id)
+        try? AppEnvironment.favourites.removeConnection(config.id)
     }
 
     func connection(_ id: UUID?) -> ConnectionConfig? {
