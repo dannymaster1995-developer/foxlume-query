@@ -90,7 +90,7 @@ final class SilentServer: @unchecked Sendable {
         _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listening, $0, &length) } }
         fd = listening
         port = Int(UInt16(bigEndian: address.sin_port))
-        DispatchQueue.global().async { [weak self] in
+        TestThreads.start { [weak self] in
             while true {
                 let client = accept(listening, nil, nil)
                 guard client >= 0 else { return }

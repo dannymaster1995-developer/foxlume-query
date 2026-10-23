@@ -151,7 +151,7 @@ struct PostgresTLSLiveTests {
     @Test func cancelWorksOverTLS() async throws {
         let connection = try connect(mode: .verifyCA, files: TLSTestServers.files(ca: "ca.crt"))
         defer { connection.close() }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { connection.cancel() }
+        TestThreads.after(0.5) { connection.cancel() }
         let started = Date()
         #expect(throws: DatabaseError.self) { _ = try connection.execute("SELECT pg_sleep(10)", rowLimit: nil) }
         #expect(Date().timeIntervalSince(started) < 5)
@@ -243,7 +243,7 @@ struct MySQLTLSLiveTests {
     @Test func killQueryReusesTheClientCertificate() throws {
         let connection = try connect(user: "certuser", password: "certpass", mode: .require, files: TLSTestServers.files(cert: "client.crt", key: "client.key"))
         defer { connection.close() }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { connection.cancel() }
+        TestThreads.after(0.5) { connection.cancel() }
         let started = Date()
         _ = try? connection.execute("SELECT SLEEP(10)", rowLimit: nil)
         #expect(Date().timeIntervalSince(started) < 5)

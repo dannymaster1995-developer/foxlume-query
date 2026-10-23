@@ -144,10 +144,11 @@ struct TLSTransportTests {
         try transport.connect(host: "127.0.0.1", port: server.port, timeout: 3)
         try transport.startTLS(try options(.none))
         // s_server waits for a request, so this read blocks until interrupted.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { transport.interrupt() }
+        TestThreads.after(0.3) { transport.interrupt() }
         let started = Date()
         _ = connectionError { _ = try transport.readByte() }
-        #expect(Date().timeIntervalSince(started) < 3)
+        // Without the interrupt the read never returns; the bound only has to allow for a loaded machine.
+        #expect(Date().timeIntervalSince(started) < 10)
     }
 
     @Test func closingLeavesNoSocketFiles() throws {

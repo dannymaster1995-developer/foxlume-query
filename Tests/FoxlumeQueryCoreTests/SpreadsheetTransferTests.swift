@@ -379,6 +379,25 @@ enum SpreadsheetTestTools {
         #expect(XLSXText.columnIndex(ofReference: "aa7") == 26)
         #expect(XLSXText.columnIndex(ofReference: "17") == nil)
     }
+
+    /// Memory stays flat: the writers hold a few hundred kilobytes at a time while many megabytes of sheet XML
+    /// pass through. Counted by the writers themselves, so suites running alongside do not change the result.
+    @Test func rowsStreamWithABoundedBuffer() throws {
+        let folder = try TransferFiles.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("stream.xlsx")
+        let writer = try ExportFileWriter(destination: url, compress: false)
+        let book = XLSXWorkbookWriter(output: writer, rowLimit: 15_000)
+        try book.beginTable(name: "kinds", columns: Self.columns, sample: Self.rows)
+        for index in 0..<30_000 { try book.writeRow(Self.rows[index % Self.rows.count]) }
+        try book.finish()
+        try writer.commit()
+        #expect(book.sheetNames == ["kinds", "kinds (2)", "kinds (3)"])
+        let sheetXML = try ZipReader(url: url).entries.filter { $0.name.hasPrefix("xl/worksheets/") }.reduce(0) { $0 + $1.size }
+        #expect(sheetXML > 8 << 20, "the sheets hold \(sheetXML >> 10) KB of XML")
+        #expect(book.peakBufferedBytes < 1 << 20, "the workbook writer held \(book.peakBufferedBytes >> 10) KB")
+        #expect(writer.peakBufferedBytes < 1 << 20, "the file writer held \(writer.peakBufferedBytes >> 10) KB")
+    }
 }
 
 @Suite struct ExcelDateTests {

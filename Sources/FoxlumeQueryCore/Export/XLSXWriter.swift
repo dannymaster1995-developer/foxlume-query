@@ -77,6 +77,10 @@ final class XLSXWorkbookWriter {
     var sheetsInTable: Int { (table ?? lastTable)?.sheetCount ?? 0 }
     /// Names of the sheets written so far, in order.
     var sheetNames: [String] { sheets.map(\.name) }
+    private var peakXMLBytes = 0
+    /// The most bytes the writer held at once: sheet XML waiting to be deflated, or deflated data on its way to
+    /// the output. It stays near the flush threshold however many rows there are.
+    var peakBufferedBytes: Int { max(peakXMLBytes, zip.largestChunk) }
 
     /// `rowLimit` is Excel's, lowered by tests to exercise the continuation sheets.
     private let rowLimit: Int
@@ -172,7 +176,9 @@ final class XLSXWorkbookWriter {
 
     private func append(_ text: String) throws {
         buffer += text
-        if buffer.utf8.count >= bufferLimit { try flush() }
+        let size = buffer.utf8.count
+        peakXMLBytes = max(peakXMLBytes, size)
+        if size >= bufferLimit { try flush() }
     }
 
     private func flush() throws {

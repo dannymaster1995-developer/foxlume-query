@@ -428,7 +428,7 @@ struct PostgresLiveTests {
     @Test func cancelInterruptsRunningStatement() throws {
         let connection = try PostgresTestServer.connect()
         defer { connection.close() }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { connection.cancel() }
+        TestThreads.after(0.5) { connection.cancel() }
         let began = Date()
         let error = #expect(throws: DatabaseError.self) { _ = try connection.execute("SELECT pg_sleep(30)", rowLimit: nil) }
         guard case .cancelled = error else {

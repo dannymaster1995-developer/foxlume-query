@@ -24,6 +24,7 @@ public final class ToolProcess: @unchecked Sendable {
     private var readers = DispatchGroup()
     private var exited = false
     private var terminateRequested = false
+    private var terminateGrace: TimeInterval = 3
 
     /// Called on a background thread with each chunk of standard output; nil discards it.
     public var onOutput: ((Data) -> Void)?
@@ -59,8 +60,10 @@ public final class ToolProcess: @unchecked Sendable {
             closeAll()
             throw BackupError.unsupported("Could not start \(name): \(String(cString: strerror(errno))).")
         }
-        // The app's ends must not leak into other children either.
-        for descriptor in [errorPipe[0], outputPipe[0], inputPipe[1]] where descriptor >= 0 {
+        // No end may leak into children that other code starts meanwhile (Foundation's Process keeps inherited
+        // descriptors): one holding the tool's end of a pipe would keep it open after the tool exits, and reading it
+        // would wait. `posix_spawn_file_actions_adddup2` clears the flag on the tool's copies 0, 1 and 2.
+        for descriptor in outputPipe + errorPipe + inputPipe where descriptor >= 0 {
             _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC)
         }
         if inputPipe[1] >= 0 {
@@ -114,7 +117,11 @@ public final class ToolProcess: @unchecked Sendable {
         lock.lock()
         pid = child
         inputDescriptor = inputPipe[1]
+        // A terminate that came before the tool existed had nothing to signal; honour it now.
+        let stopNow = terminateRequested
+        let grace = terminateGrace
         lock.unlock()
+        if stopNow { stopGroup(child, grace: grace) }
 
         readers = DispatchGroup()
         let errorDescriptor = errorPipe[0]
@@ -212,15 +219,22 @@ public final class ToolProcess: @unchecked Sendable {
     }
 
     /// Stops the tool and every process in its group: SIGTERM, then SIGKILL after `grace` seconds.
+    /// Called before `start()`, it stops the tool as soon as it has started.
     public func terminate(grace: TimeInterval = 3) {
         lock.lock()
         let child = pid
         let done = exited
         terminateRequested = true
+        terminateGrace = grace
         lock.unlock()
         guard child > 0, !done else { return }
+        stopGroup(child, grace: grace)
+    }
+
+    private func stopGroup(_ child: pid_t, grace: TimeInterval) {
         killpg(child, SIGTERM)
-        DispatchQueue.global().asyncAfter(deadline: .now() + grace) { [weak self] in
+        // A queue of its own: the shared global queues can be busy for seconds when the machine is loaded.
+        DispatchQueue(label: "com.foxlume.query.tool-kill").asyncAfter(deadline: .now() + grace) { [weak self] in
             guard let self else { return }
             self.lock.lock()
             let finished = self.exited

@@ -14,6 +14,10 @@ public final class TableExporter {
     /// reset SQL_MODE, so backslashes are escaped exactly as these fixed dialects expect.
     private let outputDialect: SQLDialect
     private var warnings: [String] = []
+    /// The most rows fetched in one page, and the most bytes a file or workbook writer held at once, over the
+    /// last export. Tests use them to check that an export streams.
+    private(set) var largestPage = 0
+    private(set) var peakBufferedBytes = 0
 
     public init(connection: DatabaseConnection, options: TableExportOptions, cancellation: OperationCancellation = OperationCancellation(), databaseName: String? = nil) {
         self.connection = connection
@@ -42,6 +46,8 @@ public final class TableExporter {
         guard !items.isEmpty else { throw DatabaseError.unsupported("Choose at least one table to export.") }
         let started = Date()
         warnings = []
+        largestPage = 0
+        peakBufferedBytes = 0
         var prepared = try items.map { Prepared(item: $0, condition: try TableExportItem.validatedCondition($0.whereClause)) }
 
         try beginSnapshot()
@@ -87,6 +93,7 @@ public final class TableExporter {
             endSnapshot(commit: true)
             // Every file is complete before any of them replaces what is on disk.
             for writer in writers { try writer.commit() }
+            peakBufferedBytes = max(peakBufferedBytes, writers.map(\.peakBufferedBytes).max() ?? 0)
         } catch {
             for writer in writers { writer.discard() }
             endSnapshot(commit: false)
@@ -243,6 +250,7 @@ public final class TableExporter {
             try cancellation.check()
             guard let page = try pager.nextPage() else { break }
             if !first, page.rows.isEmpty { break }
+            largestPage = max(largestPage, page.rows.count)
             try body(page.columns, page.rows)
             first = false
             prepared.rows += page.rows.count
@@ -345,6 +353,7 @@ public final class TableExporter {
             }
         }
         try book.finish()
+        peakBufferedBytes = max(peakBufferedBytes, book.peakBufferedBytes)
     }
 
     // MARK: SQL

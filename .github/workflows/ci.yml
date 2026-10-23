@@ -33,6 +33,8 @@ jobs:
 
       - name: Test
         # Live database suites skip themselves: no servers run on the CI machine.
+        # One test at a time, like the QA gate: the runner has 3 cores, and in a parallel run tests that block on
+        # sockets and processes hold the few shared threads, so time limits measure the other tests, not the app.
         run: |
           source scripts/env.sh
-          fqtest
+          fqtest --no-parallel

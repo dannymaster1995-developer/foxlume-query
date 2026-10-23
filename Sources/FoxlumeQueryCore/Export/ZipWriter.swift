@@ -150,6 +150,8 @@ final class ZipWriter {
     private let output: ZipOutput
     private var records: [ZipCentralRecord] = []
     private(set) var offset: UInt64 = 0
+    /// The largest piece handed to the output at once (deflated data, a whole small part, the directory).
+    private(set) var largestChunk = 0
     private let timestamp: (time: UInt16, date: UInt16)
     private var finished = false
 
@@ -171,6 +173,7 @@ final class ZipWriter {
     private func emit(_ data: Data) throws {
         try output.writeBytes(data)
         offset += UInt64(data.count)
+        largestChunk = max(largestChunk, data.count)
     }
 
     private func localHeader(_ record: ZipCentralRecord, extra: Data = Data()) -> Data {

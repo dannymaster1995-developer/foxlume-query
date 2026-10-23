@@ -14,6 +14,8 @@ final class ExportFileWriter {
     private var finished = false
     /// Uncompressed bytes written so far.
     private(set) var bytesWritten: Int64 = 0
+    /// The most bytes held in memory before a flush, so tests can check that writing streams.
+    private(set) var peakBufferedBytes = 0
 
     init(destination: URL, compress: Bool) throws {
         self.destination = destination
@@ -38,12 +40,14 @@ final class ExportFileWriter {
     func write(_ text: String) throws {
         buffer.append(contentsOf: text.utf8)
         bytesWritten += Int64(text.utf8.count)
+        peakBufferedBytes = max(peakBufferedBytes, buffer.count)
         if buffer.count >= bufferLimit { try flush() }
     }
 
     func write(_ data: Data) throws {
         buffer.append(data)
         bytesWritten += Int64(data.count)
+        peakBufferedBytes = max(peakBufferedBytes, buffer.count)
         if buffer.count >= bufferLimit { try flush() }
     }
 

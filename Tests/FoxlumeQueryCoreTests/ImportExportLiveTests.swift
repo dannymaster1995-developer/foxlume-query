@@ -678,15 +678,6 @@ struct MySQLTransferLiveTests {
 /// second sheet, with memory staying flat while the rows stream.
 @Suite("XLSX export of perf_big", .serialized, .enabled(if: PostgresTestServer.isAvailable, "needs the PostgreSQL test server"))
 struct XLSXPerfLiveTests {
-    static func residentBytes() -> UInt64 {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
-        let result = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count) }
-        }
-        return result == KERN_SUCCESS ? info.resident_size : 0
-    }
-
     @Test func perfBigStreamsToTwoSheets() throws {
         let connection = try PostgresTestServer.connect()
         defer { connection.close() }
@@ -696,21 +687,23 @@ struct XLSXPerfLiveTests {
         var options = TableExportOptions()
         options.format = .xlsx
         options.fetchSize = 5000
-        let before = Self.residentBytes()
-        var peak = before
         let started = Date()
-        let report = try TransferRoundTrip.export(connection, [TableExportItem(table: TableRef(schema: "public", name: "perf_big"))], options: options, to: .file(file)) { progress in
-            if progress.tableRows % 100_000 < 5000 { peak = max(peak, Self.residentBytes()) }
-        }
+        let exporter = TableExporter(connection: connection, options: options)
+        let report = try exporter.export([TableExportItem(table: TableRef(schema: "public", name: "perf_big"))], to: .file(file))
         let elapsed = Date().timeIntervalSince(started)
         #expect(report.totalRows == 2_000_000)
         #expect(elapsed < 600, "took \(Int(elapsed)) s")
-        // The sheet XML alone is hundreds of megabytes; streaming keeps the growth small.
-        #expect(peak - before < 200 << 20, "grew by \((peak - before) >> 20) MB")
+        // The sheet XML alone is hundreds of megabytes. Streaming holds one page of rows and a few hundred kilobytes
+        // of XML and deflated data at a time. These are the writers' own counts: process memory would also count
+        // whatever suites run alongside.
+        #expect(exporter.largestPage <= 5000, "a page held \(exporter.largestPage) rows")
+        #expect(exporter.peakBufferedBytes < 2 << 20, "held \(exporter.peakBufferedBytes >> 10) KB at once")
         #expect(report.warnings.contains { $0.contains("continues on 1 more sheet") })
         let workbook = try XLSXWorkbook(url: file)
         #expect(workbook.sheetNames == ["perf_big", "perf_big (2)"])
+        let sheetXML = try ZipReader(url: file).entries.filter { $0.name.hasPrefix("xl/worksheets/") }.reduce(0) { $0 + $1.size }
+        #expect(sheetXML > 100 << 20, "the sheets hold \(sheetXML >> 20) MB of XML")
         let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
-        print("perf_big.xlsx: \(size >> 20) MB in \(Int(elapsed)) s, resident memory grew by \((peak - before) >> 20) MB")
+        print("perf_big.xlsx: \(size >> 20) MB (\(sheetXML >> 20) MB of sheet XML) in \(Int(elapsed)) s, at most \(exporter.peakBufferedBytes >> 10) KB buffered")
     }
 }

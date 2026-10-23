@@ -40,7 +40,7 @@ The credentials are local test values (see `scripts/dbtest.sh` and the `scripts/
 
 The Backup and Restore live suites also need the client tools. MySQL's `mysqldump` and `mysql` come with the test server in `../.dbtest/mysql-bin`. The PostgreSQL test server is server-only, so put PostgreSQL client tools of the same major version or newer (`pg_dump`, `pg_restore`, `psql` and the libraries they link) in `../.dbtest/pg-client/bin`: `scripts/env.sh` then exports `FQ_PG_CLIENT_BIN` and the suites use those copies. Without that folder the suites use the tools discovery finds on the Mac (PATH, Homebrew, Postgres.app) and skip when there are none.
 
-`scripts/redis-extra.sh start` adds Redis Sentinel, Cluster and TLS servers for their suites. With every server running, use `fqtest --no-parallel`: in parallel, the live suites occupy all of Swift Testing's threads and the timing checks of the cancel and interrupt tests fail.
+`scripts/redis-extra.sh start` adds Redis Sentinel, Cluster and TLS servers for their suites. With every server running, use `fqtest --no-parallel`: in parallel, the live suites occupy all of Swift Testing's threads and the timing checks of the cancel and interrupt tests fail. CI runs `fqtest --no-parallel` too, for the same reason on its 3-core runner. In tests, fire cancels and run fake servers with `TestThreads` (a thread of their own), never on `DispatchQueue.global()`, which a parallel run keeps busy for seconds.
 
 ### Server version matrix
 

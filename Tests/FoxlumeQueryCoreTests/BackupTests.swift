@@ -538,7 +538,7 @@ import Testing
         let process = ToolProcess(executable: "/bin/sh", arguments: ["-c", "sleep 30 & echo $! > '\(marker.path)'; wait"], environment: ToolProcess.environment(adding: [:]))
         try process.start()
         var childPID: pid_t = 0
-        for _ in 0..<50 where childPID == 0 {
+        for _ in 0..<200 where childPID == 0 {
             Thread.sleep(forTimeInterval: 0.05)
             childPID = pid_t((try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
         }
@@ -556,6 +556,17 @@ import Testing
             if !gone { Thread.sleep(forTimeInterval: 0.05) }
         }
         #expect(gone)
+    }
+
+    /// BackupRunner hands the process to `cancel()` before starting it, so a cancel can arrive before the tool exists.
+    @Test func terminateBeforeStartStopsTheToolOnceItStarts() throws {
+        let process = ToolProcess(executable: "/bin/sh", arguments: ["-c", "sleep 30"], environment: ToolProcess.environment(adding: [:]))
+        process.terminate()
+        let started = Date()
+        try process.start()
+        #expect(process.waitUntilExit() == 128 + SIGTERM)
+        #expect(Date().timeIntervalSince(started) < 20)
+        #expect(process.wasTerminated)
     }
 
     @Test func missingExecutableIsReported() {
@@ -669,7 +680,8 @@ import Testing
             if case .outputSize(let size) = event, size > 0 { runner.cancel() }
         }
         #expect(cancelled.status == .cancelled)
-        #expect(Date().timeIntervalSince(started) < 10)
+        // Well before the stand-in's 30 seconds, with room for a loaded machine.
+        #expect(Date().timeIntervalSince(started) < 20)
         #expect(!FileManager.default.fileExists(atPath: folderDestination.path))
         #expect(BackupTestTools.partials(next: folderDestination).isEmpty)
     }

@@ -774,7 +774,7 @@ struct MySQLLiveTests {
     @Test func cancelInterruptsRunningQuery() throws {
         let connection = try MySQLTestServer.connect()
         defer { connection.close() }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { connection.cancel() }
+        TestThreads.after(0.5) { connection.cancel() }
         let began = Date()
         let error = caught {
             _ = try connection.execute(

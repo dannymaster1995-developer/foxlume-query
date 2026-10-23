@@ -295,7 +295,8 @@ public final class BackupRunner: @unchecked Sendable {
         // pg_dump writes the file itself; watch its size.
         var sizeTimer: DispatchSourceTimer?
         if let partial {
-            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            // A queue of its own: on a busy machine the shared utility queue can stall the reports for many seconds.
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "com.foxlume.query.backup-size", qos: .utility))
             timer.schedule(deadline: .now() + 0.3, repeating: 0.5)
             timer.setEventHandler { events(.outputSize(Self.size(of: partial))) }
             timer.resume()

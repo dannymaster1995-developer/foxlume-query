@@ -348,10 +348,13 @@ public enum BackupToolDiscovery {
         process.arguments = arguments
         process.standardInput = FileHandle.nullDevice
         let pipe = Pipe()
+        // Process passes inherited descriptors on: a copy of the write end in a tool another thread starts meanwhile
+        // (a login shell, a server) would keep the pipe open after this one exits. The child's own copies are dup2'd.
+        for handle in [pipe.fileHandleForReading, pipe.fileHandleForWriting] {
+            _ = fcntl(handle.fileDescriptor, F_SETFD, FD_CLOEXEC)
+        }
         process.standardOutput = pipe
         process.standardError = pipe
-        let done = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in done.signal() }
         do {
             try process.run()
         } catch {
@@ -365,13 +368,13 @@ public enum BackupToolDiscovery {
             data = pipe.fileHandleForReading.readDataToEndOfFile()
             readDone.signal()
         }
-        if done.wait(timeout: .now() + timeout) == .timedOut {
+        // The end of the output, not the termination handler, marks the end: Foundation calls the handler from a
+        // shared queue, which a busy machine can hold up for longer than the timeout.
+        if readDone.wait(timeout: .now() + timeout) == .timedOut {
             process.terminate()
-            _ = done.wait(timeout: .now() + 1)
             _ = readDone.wait(timeout: .now() + 1)
             return nil
         }
-        _ = readDone.wait(timeout: .now() + 2)
         return String(decoding: data, as: UTF8.self)
     }
 }

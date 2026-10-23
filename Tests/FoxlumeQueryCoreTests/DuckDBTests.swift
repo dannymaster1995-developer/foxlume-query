@@ -217,17 +217,19 @@ struct DuckDBTests {
         session.cancel()
         #expect(Self.texts(try await session.execute("SELECT 7")[0]) == [["7"]])
 
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { session.cancel() }
+        TestThreads.after(1) { session.cancel() }
         let began = Date()
         await Self.expectCancelled {
             _ = try await session.execute("SELECT sum(hash(range)) FROM range(100000000000)")
         }
         let elapsed = Date().timeIntervalSince(began)
-        #expect(elapsed > 0.9 && elapsed < 3, "cancelled after \(elapsed) s")
+        // Uncancelled, the statement runs for minutes. The upper bound is loose because resuming this test after the
+        // cancel waits for a free thread of the cooperative pool, which a parallel run on a small machine keeps busy.
+        #expect(elapsed > 0.9 && elapsed < 20, "cancelled after \(elapsed) s")
         #expect(Self.texts(try await session.execute("SELECT 'alive'")[0]) == [["alive"]])
 
         // Cancelling a materialized (non-SELECT) statement works the same way.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { session.cancel() }
+        TestThreads.after(0.5) { session.cancel() }
         await Self.expectCancelled {
             _ = try await session.execute("CREATE TABLE big AS SELECT sum(hash(range)) AS h FROM range(100000000000)")
         }

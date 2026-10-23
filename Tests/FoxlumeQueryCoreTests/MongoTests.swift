@@ -494,7 +494,7 @@ final class FakeMongoServer: @unchecked Sendable {
             while true {
                 let client = accept(fd, nil, nil)
                 guard client >= 0 else { return }
-                DispatchQueue.global().async { self?.serve(client) }
+                TestThreads.start { [weak self] in self?.serve(client) }
             }
         }.start()
     }
@@ -554,7 +554,9 @@ final class FakeMongoServer: @unchecked Sendable {
 @Suite("Mongo TLS fallback", .serialized)
 struct MongoTLSFallbackTests {
     private func connection(port: Int, sslMode: SSLMode) -> MongoConnection {
-        let config = ConnectionConfig(kind: .mongodb, host: "127.0.0.1", port: port, database: "fake", sslMode: sslMode, connectTimeout: 3)
+        // Generous: on a loaded CI machine the fake server can take seconds to answer. A refused TLS handshake still
+        // fails at once, so the tests below never wait this long.
+        let config = ConnectionConfig(kind: .mongodb, host: "127.0.0.1", port: port, database: "fake", sslMode: sslMode, connectTimeout: 15)
         return MongoConnection(parameters: ConnectionParameters(config: config, password: ""))
     }
 
@@ -1139,7 +1141,7 @@ struct MongoLiveTests {
         let connection = try MongoTestServer.connect()
         defer { connection.close() }
         let started = Date()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { connection.cancel() }
+        TestThreads.after(1) { connection.cancel() }
         do {
             _ = try connection.execute(#"db.orders.find({ $where: "sleep(100) || true" }).toArray()"#, rowLimit: nil)
             Issue.record("the command should have been cancelled")
@@ -1153,7 +1155,7 @@ struct MongoLiveTests {
         #expect(ping.first?.rows.first?.first == .text("1"))
 
         // A JavaScript sleep between commands is interrupted too.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { connection.cancel() }
+        TestThreads.after(0.5) { connection.cancel() }
         #expect(throws: DatabaseError.self) { try connection.execute("sleep(20000); db.orders.findOne()", rowLimit: nil) }
         #expect(try connection.execute("db.orders.countDocuments()", rowLimit: nil).first?.rows.first?.first == .text("250"))
     }

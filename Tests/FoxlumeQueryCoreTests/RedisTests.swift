@@ -795,7 +795,7 @@ struct RedisLiveTests {
         let connection = try RedisTestServer.connect()
         defer { connection.close() }
         let link = try connection.singleLink()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { connection.cancel() }
+        TestThreads.after(0.5) { connection.cancel() }
         let began = Date()
         guard case .cancelled? = caught({ _ = try connection.run("BLPOP \(RedisTestServer.scratchPrefix())never 30") }) else {
             Issue.record("Expected cancellation")
@@ -810,7 +810,7 @@ struct RedisLiveTests {
     @Test func cancelOnAnotherDatabaseReturnsHome() throws {
         let connection = try RedisTestServer.connect()
         defer { connection.close() }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { connection.cancel() }
+        TestThreads.after(0.3) { connection.cancel() }
         guard case .cancelled? = caught({ _ = try connection.run("DB 2 BLPOP \(RedisTestServer.scratchPrefix())never 30") }) else {
             Issue.record("Expected cancellation")
             return
@@ -1269,7 +1269,7 @@ struct RedisTopologyTests {
         let connection = try RedisTestServer.connect(port: RedisExtraServers.master, user: user, password: "pw")
         defer { connection.close() }
         let link = try connection.singleLink()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { connection.cancel() }
+        TestThreads.after(0.3) { connection.cancel() }
         let began = Date()
         guard case .cancelled? = caught({ _ = try connection.run("BLPOP \(RedisTestServer.scratchPrefix())never 30") }) else {
             Issue.record("Expected cancellation")
@@ -1291,7 +1291,7 @@ struct RedisTopologyTests {
         let connection = try RedisTestServer.connect(port: RedisExtraServers.master)
         defer { connection.close() }
         let link = try connection.singleLink()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { connection.cancel() }
+        TestThreads.after(0.3) { connection.cancel() }
         let began = Date()
         guard case .cancelled? = caught({ _ = try connection.run(#"EVAL "while true do end" 0"#) }) else {
             Issue.record("Expected cancellation")
