@@ -595,10 +595,10 @@ import Testing
         (try? String(contentsOf: folder.appendingPathComponent("probe.\(name)"), encoding: .utf8)) ?? ""
     }
 
-    private func connection(_ kind: DatabaseKind) -> BackupConnection {
+    private func connection(_ kind: DatabaseKind, serverMajor: Int? = nil) -> BackupConnection {
         var config = ConnectionConfig(kind: kind, host: "db.example.com", port: kind == .postgresql ? 5432 : 3306, user: "app", database: "shop", sslMode: .prefer)
         config.environment = .local
-        return BackupConnection(parameters: ConnectionParameters(config: config, password: password), database: "shop", serverVersion: ServerVersion(major: kind == .postgresql ? 17 : 8))
+        return BackupConnection(parameters: ConnectionParameters(config: config, password: password), database: "shop", serverVersion: ServerVersion(major: serverMajor ?? (kind == .postgresql ? 17 : 8)))
     }
 
     @Test func pgDumpGetsAPrivatePassfileAndTheBackupIsMovedIntoPlace() throws {
@@ -712,5 +712,113 @@ import Testing
         #expect(progress.last == 1)
         #expect(read(folder, "args").contains("--single-transaction\n--file=-"))
         #expect(result.command.hasSuffix("< " + ToolInvocation.shellQuoted(script.path)))
+    }
+
+    @Test(arguments: [13, 16, 17])
+    func scriptsReachOlderServersWithoutTransactionTimeout(serverMajor: Int) throws {
+        let (folder, tool) = try standIn("psql", body: "cat > \"$probe.stdin\"")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appendingPathComponent("dump.sql")
+        let header = "--\n-- PostgreSQL database dump\n--\n\nSET statement_timeout = 0;\nSET lock_timeout = 0;\nSET idle_in_transaction_session_timeout = 0;\n"
+        let body = "SET client_encoding = 'UTF8';\nCREATE TABLE public.t (note text);\nINSERT INTO public.t VALUES ('SET transaction_timeout = 0;\n');\n"
+        try Data((header + "SET transaction_timeout = 0;\n" + body).utf8).write(to: script)
+        let result = BackupRunner(job: .scriptRestore(file: script, singleTransaction: false), connection: connection(.postgresql, serverMajor: serverMajor),
+                                  tool: BackupToolCandidate(path: tool.path, version: BackupToolVersion(major: 18, flavor: .postgresql))).run { _ in }
+        #expect(result.status == .succeeded, "\(result.message ?? "")")
+        if serverMajor < 17 {
+            // Only pg_dump's own line goes; the same text inside the data stays.
+            #expect(read(folder, "stdin") == header + body)
+            #expect(result.notes.contains { $0.contains("SET transaction_timeout was left out") })
+        } else {
+            #expect(read(folder, "stdin") == header + "SET transaction_timeout = 0;\n" + body)
+            #expect(!result.notes.contains { $0.contains("transaction_timeout") })
+        }
+    }
+
+    /// A stand-in pg_restore that reports errors the way pg_restore 17 and newer do against PostgreSQL 16 and older.
+    private func failingRestore(otherError: Bool) throws -> (folder: URL, tool: URL) {
+        let error = #"pg_restore: error: could not execute query: ERROR:  unrecognized configuration parameter "transaction_timeout""#
+        return try standIn("pg_restore", body: """
+            echo 'pg_restore: connecting to database for restore' >&2
+            echo '\(error)' >&2
+            echo 'Command was: SET transaction_timeout = 0;' >&2
+            \(otherError ? "echo 'pg_restore: error: could not execute query: ERROR:  relation \"t\" already exists' >&2" : "")
+            echo 'pg_restore: warning: errors ignored on restore: \(otherError ? 2 : 1)' >&2
+            exit 1
+            """)
+    }
+
+    @Test func pgRestoreThatOnlyMissedTransactionTimeoutSucceeds() throws {
+        let (folder, tool) = try failingRestore(otherError: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let archive = folder.appendingPathComponent("shop.dump")
+        let candidate = BackupToolCandidate(path: tool.path, version: BackupToolVersion(major: 18, minor: 6, flavor: .postgresql))
+        let result = BackupRunner(job: .postgresRestore(archive: archive, kind: .postgresCustom, options: PostgresRestoreOptions()), connection: connection(.postgresql, serverMajor: 13), tool: candidate).run { _ in }
+        #expect(result.status == .succeeded, "\(result.message ?? "")")
+        #expect(result.notes.contains("pg_restore 18.6 sets transaction_timeout, which this server does not have. Only that setting failed; everything else was restored."))
+
+        // In one transaction pg_restore stops at that error, so nothing was restored.
+        var single = PostgresRestoreOptions()
+        single.singleTransaction = true
+        let stopped = BackupRunner(job: .postgresRestore(archive: archive, kind: .postgresCustom, options: single), connection: connection(.postgresql, serverMajor: 13), tool: candidate).run { _ in }
+        #expect(stopped.status == .failed)
+        #expect(stopped.message?.contains("Turn off Single Transaction, or restore with pg_restore 16 or older") == true)
+    }
+
+    @Test func pgRestoreWithOtherErrorsStillFails() throws {
+        let (folder, tool) = try failingRestore(otherError: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let result = BackupRunner(job: .postgresRestore(archive: folder.appendingPathComponent("shop.dump"), kind: .postgresCustom, options: PostgresRestoreOptions()),
+                                  connection: connection(.postgresql, serverMajor: 13), tool: BackupToolCandidate(path: tool.path, version: BackupToolVersion(major: 18, flavor: .postgresql))).run { _ in }
+        #expect(result.status == .failed)
+        #expect(result.message?.contains(#"relation "t" already exists"#) == true)
+    }
+}
+
+/// pg_dump and pg_restore 17 and newer set transaction_timeout, which PostgreSQL 16 and older do not have.
+@Suite struct TransactionTimeoutCompatibilityTests {
+    @Test func onlyOlderPostgreSQLServersSkipTheSetting() {
+        #expect(BackupCompatibility.skipsTransactionTimeout(server: ServerVersion(major: 13)))
+        #expect(BackupCompatibility.skipsTransactionTimeout(server: ServerVersion(major: 16, minor: 9)))
+        #expect(!BackupCompatibility.skipsTransactionTimeout(server: ServerVersion(major: 17)))
+        #expect(!BackupCompatibility.skipsTransactionTimeout(server: ServerVersion(major: 18)))
+        #expect(!BackupCompatibility.skipsTransactionTimeout(server: nil))
+        #expect(!BackupCompatibility.skipsTransactionTimeout(server: ServerVersion(major: 11, minor: 4, isMariaDB: true)))
+    }
+
+    @Test func recognizesTheSettingStatement() {
+        for statement in ["SET transaction_timeout = 0;", "SET transaction_timeout = 0", "set Transaction_Timeout=0;", "SET transaction_timeout TO '5s'", "  SET SESSION transaction_timeout = 0;\n"] {
+            #expect(BackupCompatibility.isTransactionTimeoutSetting(statement), "\(statement)")
+        }
+        for statement in ["SET statement_timeout = 0;", "SET transaction_timeout_extra = 0;", "SET transaction_timeout = 0; DROP TABLE t;", "SELECT 'SET transaction_timeout = 0;'"] {
+            #expect(!BackupCompatibility.isTransactionTimeoutSetting(statement), "\(statement)")
+        }
+    }
+
+    @Test func filterRemovesTheLineEvenAcrossChunks() {
+        let script = Array("SET lock_timeout = 0;\nSET transaction_timeout = 0;\nSELECT 1;\n".utf8)
+        var filter = TransactionTimeoutFilter()
+        var out: [UInt8] = []
+        var index = 0
+        while index < script.count {
+            out += filter.filter(Array(script[index..<min(index + 7, script.count)]), final: false)
+            index += 7
+        }
+        out += filter.filter([], final: true)
+        #expect(String(decoding: out, as: UTF8.self) == "SET lock_timeout = 0;\nSELECT 1;\n")
+        #expect(filter.removed)
+    }
+
+    @Test func filterLeavesEverythingElseAlone() {
+        // Not at the start of a line, and past the header window.
+        let quoted = Array("-- SET transaction_timeout = 0;\nSELECT 1;\n".utf8)
+        var first = TransactionTimeoutFilter()
+        #expect(first.filter(quoted, final: true) == quoted)
+        #expect(!first.removed)
+        let late = Array((String(repeating: "-- padding\n", count: 1000) + "SET transaction_timeout = 0;\n").utf8)
+        var second = TransactionTimeoutFilter()
+        let passed = second.filter(late, final: false) + second.filter(Array("SELECT 2;\n".utf8), final: true)
+        #expect(passed == late + Array("SELECT 2;\n".utf8))
+        #expect(!second.removed)
     }
 }

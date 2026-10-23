@@ -25,86 +25,11 @@ MONGODATA="$T/mongo-data"
 REDIS="$T/redis-src/src"
 REDISDATA="$T/redis-data"
 RUN="$T/run"
+PG_PORT=55432
+MY_PORT=53306
 mkdir -p "$RUN"
 
-pg_init() {
-  [ -d "$PGDATA" ] && return
-  echo postgres > "$RUN/pgpass"
-  "$PG/initdb" -D "$PGDATA" -U postgres --pwfile="$RUN/pgpass" --auth=scram-sha-256 -E UTF8 --locale=C >/dev/null
-  cat >> "$PGDATA/postgresql.conf" <<EOF
-listen_addresses = '127.0.0.1'
-port = 55432
-unix_socket_directories = '$RUN'
-ssl = on
-ssl_cert_file = 'server.crt'
-ssl_key_file = 'server.key'
-password_encryption = 'scram-sha-256'
-EOF
-  openssl req -new -x509 -days 3650 -nodes -subj "/CN=localhost" \
-    -keyout "$PGDATA/server.key" -out "$PGDATA/server.crt" >/dev/null 2>&1
-  chmod 600 "$PGDATA/server.key"
-  cat > "$PGDATA/pg_hba.conf" <<EOF
-local all all scram-sha-256
-host all md5user 127.0.0.1/32 md5
-host all all 127.0.0.1/32 scram-sha-256
-EOF
-}
-
-# Seed in single-user mode (the portable build ships no psql). Statements end with ";" + blank line (-j).
-pg_seed() {
-  [ -f "$PGDATA/.seeded" ] && return
-  "$PG/pg_ctl" -D "$PGDATA" -m fast stop >/dev/null 2>&1 || true
-  "$PG/postgres" --single -j -D "$PGDATA" postgres >/dev/null <<'EOF'
-SET password_encryption = 'md5';
-
-CREATE ROLE md5user LOGIN PASSWORD 'md5pass';
-
-CREATE DATABASE foxlume;
-
-EOF
-  awk '{print} /;[[:space:]]*$/ {print ""}' "$SCRIPTS/seed-postgres.sql" \
-    | "$PG/postgres" --single -j -D "$PGDATA" foxlume > "$RUN/pg-seed.log" 2>&1
-  touch "$PGDATA/.seeded"
-}
-
-my_init() {
-  [ -d "$MYDATA" ] && return
-  "$MY/bin/mysqld" --no-defaults --initialize-insecure --datadir="$MYDATA" --basedir="$MY" >/dev/null 2>&1
-}
-
-my_start() {
-  "$MY/bin/mysqld" --no-defaults --datadir="$MYDATA" --basedir="$MY" \
-    --bind-address=127.0.0.1 --port=53306 --mysqlx=OFF \
-    --socket="$RUN/mysql.sock" --pid-file="$RUN/mysql.pid" \
-    --log-error="$RUN/mysql.log" --secure-file-priv="$RUN" \
-    --mysql-native-password=ON >/dev/null 2>&1 &
-  for _ in $(seq 1 60); do
-    "$MY/bin/mysqladmin" --no-defaults -S "$RUN/mysql.sock" -u root ping >/dev/null 2>&1 && return
-    "$MY/bin/mysqladmin" --no-defaults -S "$RUN/mysql.sock" -u root -proot ping >/dev/null 2>&1 && return
-    sleep 0.5
-  done
-  echo "MySQL did not start; see $RUN/mysql.log" >&2
-  exit 1
-}
-
-# Seeds once; later starts keep whatever the databases hold now (seed-mysql-orders.sql drops and recreates `orders`).
-my_seed() {
-  [ -f "$MYDATA/.seeded" ] && return
-  local auth=(-u root)
-  "$MY/bin/mysql" --no-defaults -S "$RUN/mysql.sock" -u root -e "SELECT 1" >/dev/null 2>&1 || auth=(-u root -proot)
-  "$MY/bin/mysql" --no-defaults -S "$RUN/mysql.sock" "${auth[@]}" 2>/dev/null <<'EOF'
-ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'root';
-CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED WITH caching_sha2_password BY 'root';
-GRANT ALL ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-CREATE USER IF NOT EXISTS 'native'@'%' IDENTIFIED WITH mysql_native_password BY 'nativepass';
-GRANT ALL ON *.* TO 'native'@'%';
-CREATE DATABASE IF NOT EXISTS foxlume;
-FLUSH PRIVILEGES;
-EOF
-  "$MY/bin/mysql" --no-defaults -S "$RUN/mysql.sock" -u root -proot foxlume < "$SCRIPTS/seed-mysql.sql" 2>/dev/null
-  "$MY/bin/mysql" --no-defaults -S "$RUN/mysql.sock" -u root -proot < "$SCRIPTS/seed-mysql-orders.sql" 2>/dev/null
-  touch "$MYDATA/.seeded"
-}
+source "$SCRIPTS/test-servers.sh"
 
 mongo_start() {
   mkdir -p "$MONGODATA"
@@ -157,7 +82,7 @@ case "${1:-status}" in
   start)
     pg_init
     pg_seed
-    "$PG/pg_ctl" -D "$PGDATA" status >/dev/null 2>&1 || "$PG/pg_ctl" -D "$PGDATA" -l "$RUN/pg.log" -w start >/dev/null
+    pg_start
     my_init
     "$MY/bin/mysqladmin" --no-defaults -S "$RUN/mysql.sock" -u root -proot ping >/dev/null 2>&1 || my_start
     my_seed

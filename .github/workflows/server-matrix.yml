@@ -1,0 +1,91 @@
+name: Server matrix
+
+# The live PostgreSQL and MySQL suites against every server version in scripts/server-matrix.json, one server per
+# job: on release tags, weekly and on demand (optionally for one version). Each job runs scripts/ci-server.sh, which
+# downloads the pinned prebuilt server and checks its SHA-256, starts it with the seed data and runs that engine's
+# live suites. macOS runners have no Docker, and the live tests need Network.framework, so the servers run as plain
+# processes on the runner.
+on:
+  push:
+    tags: ['v*']
+  schedule:
+    # Mondays 03:17 UTC, away from the top of the hour when scheduled runs queue up.
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      server:
+        description: 'One server as <engine>-<major> (for example postgresql-13 or mysql-8.0), or all'
+        required: false
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the servers
+        id: matrix
+        env:
+          SERVER: ${{ inputs.server || 'all' }}
+        run: echo "matrix=$(scripts/ci-server.sh matrix "$SERVER")" >> "$GITHUB_OUTPUT"
+
+  live-tests:
+    needs: plan
+    name: ${{ matrix.engine }} ${{ matrix.major }}
+    # macOS 26 ships Xcode 26 by default, close to the Swift 6.3 toolchain the project is developed with.
+    runs-on: macos-26
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcode-select -p
+          swift --version
+
+      - name: Cache DuckDB download
+        uses: actions/cache@v4
+        with:
+          path: .build/duckdb-download
+          key: duckdb-${{ hashFiles('scripts/fetch-duckdb.sh') }}
+
+      - name: Fetch DuckDB
+        run: scripts/fetch-duckdb.sh
+
+      - name: Cache the server
+        uses: actions/cache@v4
+        with:
+          path: .build/servers/dist
+          key: server-${{ matrix.engine }}-${{ matrix.version }}-${{ hashFiles('scripts/server-matrix.json') }}
+
+      - name: Fetch the server
+        run: scripts/ci-server.sh fetch ${{ matrix.engine }} ${{ matrix.major }}
+
+      - name: Build
+        run: |
+          source scripts/env.sh
+          fqswift build
+
+      - name: Start the server
+        run: scripts/ci-server.sh start ${{ matrix.engine }} ${{ matrix.major }}
+
+      - name: Live tests
+        # On failure the step ends with the failing tests and their messages.
+        run: scripts/ci-server.sh test ${{ matrix.engine }} ${{ matrix.major }}
+
+      - name: Server log
+        if: failure()
+        run: tail -n 60 .build/servers/run/*.log || true
+
+      - name: Stop the server
+        if: always()
+        run: scripts/ci-server.sh stop ${{ matrix.engine }} ${{ matrix.major }}

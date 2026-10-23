@@ -241,11 +241,18 @@ public final class BackupRunner: @unchecked Sendable {
             input: scriptFile == nil ? .none : .pipe
         )
         var errorLines: [String] = []
+        // pg_restore errors over the whole run, and how many of them were transaction_timeout on an older server.
+        var restoreErrors = 0
+        var transactionTimeoutErrors = 0
         let linesLock = NSLock()
         process.onErrorLine = { line in
             linesLock.lock()
             errorLines.append(line)
             if errorLines.count > 400 { errorLines.removeFirst(errorLines.count - 400) }
+            if line.hasPrefix("pg_restore: error:") {
+                restoreErrors += 1
+                if line.contains(BackupCompatibility.transactionTimeoutError) { transactionTimeoutErrors += 1 }
+            }
             linesLock.unlock()
             events(.log(line))
         }
@@ -295,8 +302,11 @@ public final class BackupRunner: @unchecked Sendable {
             sizeTimer = timer
         }
         var feedFailure: String?
+        var skippedTransactionTimeout = false
         let feeding = DispatchGroup()
         if let scriptFile {
+            var filter = config.kind == .postgresql && BackupCompatibility.skipsTransactionTimeout(server: connection.serverVersion)
+                ? TransactionTimeoutFilter() : nil
             feeding.enter()
             Thread.detachNewThread {
                 defer {
@@ -306,14 +316,18 @@ public final class BackupRunner: @unchecked Sendable {
                 do {
                     let reader = try RawFileReader(url: scriptFile)
                     var lastReport = Date.distantPast
-                    while let chunk = try reader.read() {
-                        guard process.writeInput(chunk) else { break }
+                    var open = true
+                    while open, let chunk = try reader.read() {
+                        let bytes = filter?.filter(chunk, final: false) ?? chunk
+                        open = bytes.isEmpty || process.writeInput(bytes)
                         let now = Date()
                         if now.timeIntervalSince(lastReport) >= 0.2 {
                             lastReport = now
                             events(.inputProgress(read: reader.bytesRead, total: reader.totalBytes))
                         }
                     }
+                    if open, let rest = filter?.filter([], final: true), !rest.isEmpty { _ = process.writeInput(rest) }
+                    skippedTransactionTimeout = filter?.removed ?? false
                     events(.inputProgress(read: reader.totalBytes, total: reader.totalBytes))
                 } catch {
                     feedFailure = error.localizedDescription
@@ -331,7 +345,11 @@ public final class BackupRunner: @unchecked Sendable {
 
         linesLock.lock()
         let lines = errorLines
+        let onlyTransactionTimeout = restoreErrors > 0 && restoreErrors == transactionTimeoutErrors
         linesLock.unlock()
+        if skippedTransactionTimeout {
+            notes.append("pg_dump's SET transaction_timeout was left out: this server does not have that setting.")
+        }
         if isCancelled {
             discardOutput()
             return result(.cancelled, exitCode: exitCode)
@@ -339,6 +357,15 @@ public final class BackupRunner: @unchecked Sendable {
         if let failure = writeFailure ?? feedFailure {
             discardOutput()
             return result(.failed, exitCode: exitCode, message: failure)
+        }
+        // pg_restore 17 and newer set transaction_timeout, which older servers reject. Without a single transaction
+        // pg_restore carries on, so when that was its only error the restore is complete.
+        if case let .postgresRestore(_, _, options) = job, exitCode != 0, onlyTransactionTimeout {
+            if options.singleTransaction {
+                return result(.failed, exitCode: exitCode, message: BackupCompatibility.transactionTimeoutNote(tool: tool.version, failed: true))
+            }
+            notes.append(BackupCompatibility.transactionTimeoutNote(tool: tool.version, failed: false))
+            return result(.succeeded, exitCode: exitCode)
         }
         guard exitCode == 0 else {
             discardOutput()

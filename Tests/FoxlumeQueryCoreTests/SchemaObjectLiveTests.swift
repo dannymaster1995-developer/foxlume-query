@@ -28,11 +28,15 @@ struct PostgresSchemaObjectLiveTests {
                 DROP DOMAIN IF EXISTS \(p)_positive;
                 """, rowLimit: nil)
         }
+        // SQL-standard bodies (RETURN, BEGIN ATOMIC) came with PostgreSQL 14; older servers get quoted bodies.
+        let standardBodies = connection.serverVersionNumber >= 140_000
+        let intBody = standardBodies ? "RETURN a + b" : "AS $$ SELECT a + b $$"
+        let textBody = standardBodies ? "BEGIN ATOMIC SELECT a || b; END" : "AS $$ SELECT a || b $$"
         _ = try connection.execute("""
             CREATE TABLE \(items) (id integer PRIMARY KEY, qty integer CONSTRAINT \(p)_qty_check CHECK (qty >= 0), note text);
             ALTER TABLE \(items) ADD CONSTRAINT \(p)_note_check CHECK (note <> '') NOT VALID;
-            CREATE FUNCTION \(p)_add(a integer, b integer) RETURNS integer LANGUAGE sql IMMUTABLE RETURN a + b;
-            CREATE FUNCTION \(p)_add(a text, b text) RETURNS text LANGUAGE sql BEGIN ATOMIC SELECT a || b; END;
+            CREATE FUNCTION \(p)_add(a integer, b integer) RETURNS integer LANGUAGE sql IMMUTABLE \(intBody);
+            CREATE FUNCTION \(p)_add(a text, b text) RETURNS text LANGUAGE sql \(textBody);
             CREATE PROCEDURE \(p)_proc(IN x integer, INOUT y integer) LANGUAGE plpgsql AS $$ BEGIN y := x + 1; END $$;
             CREATE FUNCTION \(p)_trgfn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.qty := coalesce(NEW.qty, 0); RETURN NEW; END $$;
             CREATE TRIGGER \(p)_trg BEFORE INSERT OR UPDATE OF qty ON \(items) FOR EACH ROW WHEN (NEW.id > 0) EXECUTE FUNCTION \(p)_trgfn();
@@ -58,7 +62,9 @@ struct PostgresSchemaObjectLiveTests {
 
         let procedures = try connection.schemaObjects(.procedure, schema: "public").filter { $0.name.hasPrefix(p) }
         #expect(procedures.map(\.name) == ["\(p)_proc"])
-        #expect(procedures.first?.arguments == "IN x integer, INOUT y integer")
+        // PostgreSQL 13 leaves out the IN of a procedure argument; 14 and later spell it out.
+        let procedureArguments = standardBodies ? "IN x integer, INOUT y integer" : "x integer, INOUT y integer"
+        #expect(procedures.first?.arguments == procedureArguments)
 
         let triggers = try connection.schemaObjects(.trigger, schema: nil).filter { $0.name.hasPrefix(p) }
         #expect(triggers.map(\.name) == ["\(p)_trg"])
@@ -73,9 +79,9 @@ struct PostgresSchemaObjectLiveTests {
         // Definitions.
         let textAdd = try connection.definition(of: functions[1])
         #expect(textAdd.statement.hasPrefix("CREATE OR REPLACE FUNCTION public.\(p)_add(a text, b text)"))
-        #expect(textAdd.statement.contains("BEGIN ATOMIC"))
+        #expect(textAdd.statement.contains(standardBodies ? "BEGIN ATOMIC" : "SELECT a || b"))
         let procedureDefinition = try connection.definition(of: procedures[0])
-        #expect(procedureDefinition.statement.hasPrefix("CREATE OR REPLACE PROCEDURE public.\(p)_proc(IN x integer, INOUT y integer)"))
+        #expect(procedureDefinition.statement.hasPrefix("CREATE OR REPLACE PROCEDURE public.\(p)_proc(\(procedureArguments))"))
         let triggerDefinition = try connection.definition(of: triggers[0])
         #expect(triggerDefinition.statement.hasPrefix("CREATE TRIGGER \(p)_trg BEFORE INSERT OR UPDATE OF qty ON public.\(items)"))
         #expect(triggerDefinition.triggerFunction?.hasPrefix("CREATE OR REPLACE FUNCTION public.\(p)_trgfn()") == true)

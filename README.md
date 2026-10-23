@@ -134,8 +134,8 @@ Browse tables, write SQL with smart autocomplete, edit data safely and understan
 
 | Database | Status | Notes |
 |---|---|---|
-| **PostgreSQL** | ✅ Supported | Tested with 18; SCRAM-SHA-256, MD5, TLS 1.3 |
-| **MySQL** | ✅ Supported | Tested with 8.4; caching_sha2_password, TLS 1.3 |
+| **PostgreSQL** | ✅ Supported | Tested with 13 to 18; SCRAM-SHA-256, MD5, TLS 1.3 |
+| **MySQL** | ✅ Supported | Tested with 8.0 and 8.4; caching_sha2_password, TLS 1.3 |
 | MariaDB | 🧪 Beta | Uses the MySQL driver |
 | SQLite | 🧪 Beta | Uses the system SQLite |
 | DuckDB | 🧪 Beta | Opens `.duckdb`, Parquet, CSV and JSON files |

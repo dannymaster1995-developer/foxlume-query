@@ -42,6 +42,23 @@ The Backup and Restore live suites also need the client tools. MySQL's `mysqldum
 
 `scripts/redis-extra.sh start` adds Redis Sentinel, Cluster and TLS servers for their suites. With every server running, use `fqtest --no-parallel`: in parallel, the live suites occupy all of Swift Testing's threads and the timing checks of the cancel and interrupt tests fail.
 
+### Server version matrix
+
+`.github/workflows/server-matrix.yml` runs the live PostgreSQL and MySQL suites against every server version in `scripts/server-matrix.json`, one server per job on a macOS runner: on release tags, every Monday and on demand (Actions › Server matrix › Run workflow, optionally with one server such as `postgresql-13` or `mysql-8.0`). A failing job ends its log with the failing tests and their messages, then the server log. Each job runs `scripts/ci-server.sh`, which works the same on a Mac, so one version can be checked locally:
+
+```bash
+scripts/dbtest.sh stop                      # the matrix server takes the same port
+scripts/ci-server.sh start postgresql 13    # download, check the SHA-256, set up, seed (perf_big included) and start
+scripts/ci-server.sh test postgresql 13     # fqtest --no-parallel on that engine's live suites; failures summed up at the end
+scripts/ci-server.sh stop postgresql 13
+scripts/ci-server.sh clean --all            # delete .build/servers (downloads, servers, data and logs)
+scripts/dbtest.sh start                     # back to the local servers
+```
+
+The engines are `postgresql` and `mysql`, with the major versions the manifest lists. Servers listen on the ports the live tests use, with the users and seed data of `scripts/dbtest.sh`; both scripts share their set-up steps in `scripts/test-servers.sh`. Every server is a prebuilt archive, never a source build: PostgreSQL from the zonky embedded-postgres archives on Maven Central, with pg_dump, pg_restore and psql 18 from EDB's macOS binaries for the backup tests; MySQL from Oracle's macOS tarballs, whose own mysqldump and mysql the backup tests use. Downloads, servers, data and logs stay in `.build/servers`, which grows fast (each version's data folder holds the two million seed rows; four versions came to about 3 GB): `clean` deletes data and logs, `clean --all` everything. `test` picks every test type in the files that use the engine's test server, so a new live suite joins the matrix by itself; the other engine's suites in those files and the TLS suites (`scripts/dbtest-tls.sh`) skip there. Live tests that depend on the server version check it (`serverVersionNumber`, `serverVersion`) and say why. MariaDB, SQLite, DuckDB, MongoDB and Redis are Beta and not in the matrix; MariaDB joins with v0.2.0 (FQ-201).
+
+To add or update a version, add or edit its entry in `scripts/server-matrix.json`: `engine`, `major`, the exact `version`, the download `urls` (tried in order; Oracle moves older releases to its archives folder) and the archive's `sha256` (`shasum -a 256 <file>`), after checking the file against what the publisher lists (the `.sha1` next to each jar on Maven Central, the MD5 on Oracle's download page). Zonky's macOS arm64 archives are on Maven Central under `io/zonky/test/postgres/embedded-postgres-binaries-darwin-arm64v8` (PostgreSQL 13 only as 13.6.0). Run `start` and `test` for that version on a Mac before pushing; the workflow caches each server by version and manifest, and the matrix is built from the manifest, so the workflow itself needs no change.
+
 ## Making a change
 
 1. Pick or add a task in [ROADMAP.md](../ROADMAP.md) and mention its ID (`FQ-###`) in the commit or pull request.

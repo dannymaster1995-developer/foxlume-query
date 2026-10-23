@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import FoxlumeQueryCore
 
-/// The client tools the live backup tests run: the binaries that come with the test servers in `../.dbtest`. The
-/// PostgreSQL test binaries are server-only, so pg_dump and pg_restore come from `FQ_PG_CLIENT_BIN` (set by
-/// `scripts/env.sh` when `../.dbtest/pg-client/bin` exists), else the copy tool discovery finds on this Mac. Suites
-/// skip without.
+/// The client tools the live backup tests run: the binaries that come with the test servers in `../.dbtest`, or the
+/// folder in `FQ_MYSQL_CLIENT_BIN` (set by `scripts/ci-server.sh` to the matrix server's own tools). The PostgreSQL
+/// test binaries are server-only, so pg_dump and pg_restore come from `FQ_PG_CLIENT_BIN` (set by `scripts/env.sh`
+/// when `../.dbtest/pg-client/bin` exists), else the copy tool discovery finds on this Mac. Suites skip without.
 enum BackupTestTools {
     static let dbtest = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -25,9 +25,14 @@ enum BackupTestTools {
         return nil
     }
 
-    static let mysqldump = bundled(.mysqldump, in: "mysql-bin")
-    static let mysqlClient = bundled(.mysql, in: "mysql-bin")
-    static let pgClientBin = ProcessInfo.processInfo.environment["FQ_PG_CLIENT_BIN"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+    static func environmentFolder(_ name: String) -> URL? {
+        ProcessInfo.processInfo.environment[name].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+    }
+
+    static let mysqlClientBin = environmentFolder("FQ_MYSQL_CLIENT_BIN")
+    static let mysqldump = mysqlClientBin.map { bundled(.mysqldump, inBin: $0) } ?? bundled(.mysqldump, in: "mysql-bin")
+    static let mysqlClient = mysqlClientBin.map { bundled(.mysql, inBin: $0) } ?? bundled(.mysql, in: "mysql-bin")
+    static let pgClientBin = environmentFolder("FQ_PG_CLIENT_BIN")
 
     static func postgres(_ tool: BackupTool) -> BackupToolCandidate? {
         pgClientBin.flatMap { bundled(tool, inBin: $0) } ?? BackupToolDiscovery.find(tool).chosen
@@ -36,6 +41,18 @@ enum BackupTestTools {
     static let pgDump = postgres(.pgDump)
     static let pgRestore = postgres(.pgRestore)
     static let psql = postgres(.psql)
+
+    /// The test servers' versions, as the app passes them on from its session.
+    static let postgresVersion: ServerVersion? = {
+        guard let connection = try? PostgresTestServer.connect() else { return nil }
+        defer { connection.close() }
+        return ServerVersion.parse(connection.serverVersion)
+    }()
+    static let mysqlVersion: ServerVersion? = {
+        guard let connection = try? MySQLTestServer.connect() else { return nil }
+        defer { connection.close() }
+        return ServerVersion.parse(connection.serverVersion)
+    }()
 
     static var mysqlReady: Bool { MySQLTestServer.isAvailable && mysqldump != nil && mysqlClient != nil }
     static var postgresReady: Bool { PostgresTestServer.isAvailable && pgDump != nil && pgRestore != nil && psql != nil }
@@ -116,7 +133,7 @@ struct MySQLBackupLiveTests {
     }
 
     private func connection(to database: String) -> BackupConnection {
-        BackupConnection(parameters: MySQLTestServer.parameters(database: database), database: database, serverVersion: ServerVersion(major: 8, minor: 4))
+        BackupConnection(parameters: MySQLTestServer.parameters(database: database), database: database, serverVersion: BackupTestTools.mysqlVersion)
     }
 
     /// Row counts of the scratch tables, the trigger, routine and view, and the binary values as hex.
@@ -353,7 +370,7 @@ struct PostgresBackupLiveTests {
 
     private func connection(to database: String) -> BackupConnection {
         let config = ConnectionConfig(kind: .postgresql, host: PostgresTestServer.host, port: PostgresTestServer.port, user: "postgres", database: database, sslMode: .prefer)
-        return BackupConnection(parameters: ConnectionParameters(config: config, password: "postgres"), database: database)
+        return BackupConnection(parameters: ConnectionParameters(config: config, password: "postgres"), database: database, serverVersion: BackupTestTools.postgresVersion)
     }
 
     @Test func customBackupRestoresWithPgRestore() throws {

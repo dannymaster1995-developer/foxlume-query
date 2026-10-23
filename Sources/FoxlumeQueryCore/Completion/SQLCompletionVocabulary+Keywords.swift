@@ -187,6 +187,7 @@ extension SQLCompletionVocabulary {
     /// word one of them would accept is harmless.
     static let mysqlReservedWords = mysqlCatalogueReservedWords
         .union(mysqlUnlistedReservedWords)
+        .union(mysql80ReservedWords)
         .union(mariadbReservedWords)
 
     /// information_schema.KEYWORDS with RESERVED = 1 (MySQL 8.4).
@@ -214,9 +215,15 @@ extension SQLCompletionVocabulary {
         """)
 
     /// MySQL 8.4 marks these RESERVED = 0, yet its parser rejects them as bare names; SQL_NO_CACHE and
-    /// SQL_BUFFER_RESULT only as the first item of a SELECT list, where they read as modifiers.
+    /// SQL_BUFFER_RESULT only as the first item of a SELECT list, where they read as modifiers. Some releases take
+    /// MANUAL, PARALLEL, QUALIFY or TABLESAMPLE as bare names (8.0, 8.4.13); quoting them there is harmless.
     static let mysqlUnlistedReservedWords = words("""
         CUBE MANUAL PARALLEL QUALIFY SQL_BUFFER_RESULT SQL_NO_CACHE TABLESAMPLE
+        """)
+
+    /// Reserved in MySQL 8.0 but no longer in 8.4.
+    static let mysql80ReservedWords = words("""
+        MASTER_BIND
         """)
 
     /// Reserved in MariaDB (its "Reserved Words" documentation, up to 12.3) but not in MySQL 8.4.

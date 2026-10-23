@@ -10,9 +10,15 @@ extension AppCompletionTests {
     @Suite("Backup and Restore", .serialized)
     @MainActor
     struct BackupAppTests {
-        nonisolated static let mysqldump = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(".dbtest/mysql-bin/bin/mysqldump").path
+        /// The test server's own mysqldump: `FQ_MYSQL_CLIENT_BIN` (set by `scripts/ci-server.sh`), else `../.dbtest/mysql-bin`.
+        nonisolated static let mysqldump: String = {
+            if let folder = ProcessInfo.processInfo.environment["FQ_MYSQL_CLIENT_BIN"], !folder.isEmpty {
+                return URL(fileURLWithPath: folder).appendingPathComponent("mysqldump").path
+            }
+            return URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent(".dbtest/mysql-bin/bin/mysqldump").path
+        }()
         nonisolated static var ready: Bool { LiveServer.mysql && FileManager.default.isExecutableFile(atPath: mysqldump) }
         static let scratch = "fq114_app"
 
@@ -129,7 +135,9 @@ extension AppCompletionTests {
             let model = try #require(BackupController.presented?.model)
             #expect(model !== broken)
             await settle(until: { model.toolSearch != nil }, seconds: 10)
-            #expect(model.toolLine == "mysqldump 8.4.9 (chosen in Settings)")
+            // The test server's own tool, whichever version it is (8.4 locally; every matrix version on CI).
+            let version = try #require(BackupToolDiscovery.version(ofToolAt: Self.mysqldump))
+            #expect(model.toolLine == "mysqldump \(version) (chosen in Settings)")
             #expect(model.toolPath == Self.mysqldump)
             #expect(model.scope == .tables([table]))
             #expect(model.suggestedName.hasPrefix("fq114_app-fq114_app_items-") && model.suggestedName.hasSuffix(".sql"))

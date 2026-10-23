@@ -156,12 +156,17 @@ public final class SQLFileRunner {
             SQLFileReport(statementsRun: run, statementsFailed: failed, issues: issues, failure: failure, affectedRows: affected, cancelled: cancelled, rolledBack: rolledBack, elapsed: Date().timeIntervalSince(started))
         }
 
+        // pg_dump 17 and newer scripts set transaction_timeout, which PostgreSQL 16 and older reject; inside the
+        // transaction that error would abort the whole file, so the setting is left out there.
+        let skipsTransactionTimeout = family == .postgresql
+            && BackupCompatibility.skipsTransactionTimeout(server: ServerVersion.parse(connection.serverVersion))
         let restoreChecks = try switchForeignKeyChecksOff(family: family)
         defer { restoreChecks() }
         if inTransaction { _ = try connection.execute(connection.dialect.beginStatement, rowLimit: nil) }
         do {
             try Self.forEachStatement(in: file, family: family, encoding: options.encoding, cancellation: cancellation, progress: { bytes = ($0, $1) }) { statement in
                 try cancellation.check()
+                if skipsTransactionTimeout, BackupCompatibility.isTransactionTimeoutSetting(statement.text) { return true }
                 do {
                     // Statements that return rows keep only a page; a dump has no use for result sets.
                     let rowLimit = SQLStatementSplitter.looksReadOnly(statement.text) ? 1000 : nil

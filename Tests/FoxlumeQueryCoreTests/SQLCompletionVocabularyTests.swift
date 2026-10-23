@@ -400,8 +400,11 @@ private func isSortedAndUnique(_ values: [String]) -> Bool {
         #expect(Vocabulary.reservedWords(.mysql).isSuperset(of: ["CUBE", "MANUAL", "PARALLEL", "QUALIFY", "TABLESAMPLE", "SQL_NO_CACHE", "SQL_BUFFER_RESULT"]))
         // MariaDB shares the family and reserves a few more.
         #expect(Vocabulary.reservedWords(.mysql).isSuperset(of: ["RETURNING", "OFFSET", "CURRENT_ROLE", "VECTOR", "STATS_PERSISTENT"]))
+        // MySQL 8.0 still reserves MASTER_BIND.
+        #expect(Vocabulary.reservedWords(.mysql).contains("MASTER_BIND"))
         #expect(Vocabulary.reservedWords(.mysql) == Vocabulary.mysqlCatalogueReservedWords
             .union(Vocabulary.mysqlUnlistedReservedWords)
+            .union(Vocabulary.mysql80ReservedWords)
             .union(Vocabulary.mariadbReservedWords))
         #expect(Vocabulary.mysqlCatalogueReservedWords.isDisjoint(with: Vocabulary.mysqlUnlistedReservedWords))
         #expect(Vocabulary.mysqlCatalogueReservedWords.isDisjoint(with: Vocabulary.mariadbReservedWords))
@@ -533,6 +536,9 @@ struct SQLCompletionVocabularyLiveTests {
     func postgresqlNamesExist() async throws {
         let config = ConnectionConfig(kind: .postgresql, host: PostgresTestServer.host, port: PostgresTestServer.port, user: "postgres", database: "foxlume", sslMode: .prefer)
         let session = try await Self.open(config, password: "postgres")
+        // The vocabulary follows PostgreSQL 18. Older servers lack some of its functions, types and keywords, which
+        // completion still offers there; on them only check that every word the server reserves gets quoted.
+        let current = (Int(session.serverVersion.prefix { $0.isNumber }) ?? 0) >= 18
         let functions = try await Self.values(session, """
             SELECT DISTINCT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'pg_catalog'
             """)
@@ -541,19 +547,26 @@ struct SQLCompletionVocabularyLiveTests {
             "current_catalog", "current_role", "json_exists", "json_query", "json_scalar", "json_serialize", "json_table", "json_value",
             "xmlconcat", "xmlelement", "xmlforest", "xmlparse", "xmlpi", "xmlroot", "xmlserialize", "xmltable",
         ]
-        let missing = Self.lowercasedNames(.postgresql).filter { !functions.contains($0) && !syntaxForms.contains($0) }
-        #expect(missing.isEmpty, "unknown PostgreSQL functions: \(missing)")
+        if current {
+            let missing = Self.lowercasedNames(.postgresql).filter { !functions.contains($0) && !syntaxForms.contains($0) }
+            #expect(missing.isEmpty, "unknown PostgreSQL functions: \(missing)")
 
-        let candidates = Vocabulary.dataTypes(.postgresql).filter { !Vocabulary.castExcludedTypes.contains($0) }
-        let list = candidates.map { SQLDialect.postgresql.quoteString($0.lowercased()) }.joined(separator: ", ")
-        let unknownTypes = try await Self.values(session, "SELECT t FROM unnest(ARRAY[\(list)]) AS t WHERE to_regtype(t) IS NULL")
-        #expect(unknownTypes.isEmpty, "unknown PostgreSQL types: \(unknownTypes.sorted())")
-        let uncastable = await Self.uncastable(session, Vocabulary.castTargetTypes(.postgresql))
-        #expect(uncastable.isEmpty, "PostgreSQL rejects these casts: \(uncastable)")
+            let candidates = Vocabulary.dataTypes(.postgresql).filter { !Vocabulary.castExcludedTypes.contains($0) }
+            let list = candidates.map { SQLDialect.postgresql.quoteString($0.lowercased()) }.joined(separator: ", ")
+            let unknownTypes = try await Self.values(session, "SELECT t FROM unnest(ARRAY[\(list)]) AS t WHERE to_regtype(t) IS NULL")
+            #expect(unknownTypes.isEmpty, "unknown PostgreSQL types: \(unknownTypes.sorted())")
+            let uncastable = await Self.uncastable(session, Vocabulary.castTargetTypes(.postgresql))
+            #expect(uncastable.isEmpty, "PostgreSQL rejects these casts: \(uncastable)")
+        }
 
         // R is fully reserved; T may name a function or type but not a column or table.
         let reserved = try await Self.values(session, "SELECT word FROM pg_get_keywords() WHERE catcode IN ('R', 'T')")
-        #expect(Set(Vocabulary.reservedWords(.postgresql).map { $0.lowercased() }) == reserved)
+        let quoted = Set(Vocabulary.reservedWords(.postgresql).map { $0.lowercased() })
+        if current {
+            #expect(quoted == reserved)
+        } else {
+            #expect(quoted.isSuperset(of: reserved), "not quoted: \(reserved.subtracting(quoted).sorted())")
+        }
         await session.close()
     }
 
@@ -588,7 +601,11 @@ struct SQLCompletionVocabularyLiveTests {
         let candidates = Set(unreserved.map { $0.uppercased() }).union(Vocabulary.mysqlUnlistedReservedWords)
         let rejected = await Self.bareNameFailures(session, candidates, create: "CREATE TEMPORARY TABLE", drop: "DROP TEMPORARY TABLE IF EXISTS", quote: "`")
         #expect(rejected.isSubset(of: Vocabulary.reservedWords(.mysql)), "rejected but inserted bare: \(rejected.subtracting(Vocabulary.reservedWords(.mysql)).sorted())")
-        #expect(Vocabulary.mysqlUnlistedReservedWords.isSubset(of: rejected), "listed but accepted: \(Vocabulary.mysqlUnlistedReservedWords.subtracting(rejected).sorted())")
+        // Which of the others a server rejects changes between releases (8.4.9 rejects them all, 8.4.13 takes MANUAL and
+        // PARALLEL as bare names, 8.0 also QUALIFY and TABLESAMPLE); quoting a word a server accepts is harmless.
+        let rejectedEverywhere: Set<String> = ["CUBE", "SQL_BUFFER_RESULT", "SQL_NO_CACHE"]
+        #expect(rejectedEverywhere.isSubset(of: Vocabulary.mysqlUnlistedReservedWords))
+        #expect(rejectedEverywhere.isSubset(of: rejected), "listed but accepted: \(rejectedEverywhere.subtracting(rejected).sorted())")
         await session.close()
     }
 }

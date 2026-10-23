@@ -64,7 +64,7 @@ AI in the editor (off by default; nothing leaves the Mac unless the user turns i
 - [x] FQ-121 GitHub Copilot as a source of inline suggestions: Sign in with GitHub in Settings, the Copilot language server downloaded on first use at a pinned version and checksum, telemetry off by default
 
 Quality and release:
-- [ ] FQ-117 Server version matrix on GitHub Actions (on release tags, weekly and on demand): PostgreSQL 13 to 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.4
+- [x] FQ-117 Server version matrix on GitHub Actions (on release tags, weekly and on demand): PostgreSQL 13 to 18, MySQL 8.0 and 8.4
 - [ ] FQ-118 UI autotest scripts that walk every PostgreSQL and MySQL feature against the local servers; the whole set runs before each release
 - [ ] FQ-123 In-app updates with Sparkle: Check for Updates…, a daily check that can be turned off, release notes and Install and Relaunch; release zips signed with EdDSA and listed in an appcast on the site; only the app version is sent
 - [ ] FQ-119 Publish v0.1.0 on GitHub Releases with a downloadable app
@@ -73,7 +73,7 @@ Quality and release:
 
 Bring the beta engines up to the same standard, then add new engines in order of use. Oracle is not planned.
 
-- [ ] FQ-201 MariaDB, SQLite, DuckDB, MongoDB and Redis from Beta to supported, including MongoDB Insert and Edit Document in Extended JSON
+- [ ] FQ-201 MariaDB, SQLite, DuckDB, MongoDB and Redis from Beta to supported (full tests, MariaDB in the server matrix), including MongoDB Insert and Edit Document in Extended JSON
 - [ ] FQ-202 SQL Server
 - [ ] FQ-203 PostgreSQL and MySQL compatible services: CockroachDB, Redshift, TiDB, OceanBase
 - [ ] FQ-204 Elasticsearch and OpenSearch

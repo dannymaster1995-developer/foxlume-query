@@ -133,3 +133,37 @@ final class RawFileReader {
 
     func read() throws -> [UInt8]? { try source.read() }
 }
+
+/// Leaves pg_dump's `SET transaction_timeout = 0;` line out of a plain script on its way to psql, for servers that
+/// do not have the setting (`BackupCompatibility.skipsTransactionTimeout`). pg_dump writes it among the SET lines
+/// at the top, so only the start of the script is looked at; everything else passes through unchanged.
+struct TransactionTimeoutFilter {
+    static let line = Array("SET transaction_timeout = 0;\n".utf8)
+    /// How far into the script the line can be.
+    static let window = 8192
+
+    private var pending: [UInt8] = []
+    private var done = false
+    private(set) var removed = false
+
+    /// The bytes to pass on for this chunk: none while the start of the script is still being collected.
+    mutating func filter(_ chunk: [UInt8], final: Bool) -> [UInt8] {
+        if done { return chunk }
+        pending += chunk
+        guard pending.count >= Self.window || final else { return [] }
+        done = true
+        var bytes = pending
+        pending = []
+        let limit = min(bytes.count, Self.window)
+        var start = 0
+        while start + Self.line.count <= limit {
+            if (start == 0 || bytes[start - 1] == 0x0A), bytes[start..<(start + Self.line.count)].elementsEqual(Self.line) {
+                bytes.removeSubrange(start..<(start + Self.line.count))
+                removed = true
+                break
+            }
+            start += 1
+        }
+        return bytes
+    }
+}

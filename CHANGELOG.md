@@ -44,6 +44,8 @@ First public version.
 
 ### Fixed
 
+- Restoring a backup made by pg_dump 17 or newer into PostgreSQL 13 to 16 no longer fails on `SET transaction_timeout`, a setting those servers do not have. Run SQL File and psql restores leave pg_dump's line out (the summary says so); a pg_restore run whose only error was that setting counts as complete, with a note, and with Single Transaction on, where pg_restore stops at once, the message says to turn it off or use pg_restore 16 or older.
+- SQL completion on MySQL 8.0 quotes `MASTER_BIND`, which 8.0 still reserves.
 - Opening many tabs no longer widens the workspace window past the screen. The tab strip shows as many tabs as fit (more or fewer as the window is resized), always including the selected tab and the most recently used ones; a "+N" button after them lists the hidden tabs, and choosing one brings it into view. A workspace window that would open larger than the screen is fitted to it.
 
 [Unreleased]: https://github.com/dannymaster1995-developer/foxlume-query/commits/main

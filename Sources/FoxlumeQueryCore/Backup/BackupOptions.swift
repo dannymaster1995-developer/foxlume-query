@@ -223,6 +223,31 @@ public enum BackupCompatibility {
         return "\(path) is version \(tool), older than the server (PostgreSQL \(server.major)). pg_dump cannot back up a newer server; install pg_dump \(server.major) or later (brew install libpq, or Postgres.app) or choose a newer copy in Settings › Backup Tools."
     }
 
+    /// pg_dump and pg_restore 17 and newer start every script and every restore with `SET transaction_timeout = 0`,
+    /// which PostgreSQL 16 and older reject ("unrecognized configuration parameter"), even for a backup of that same
+    /// server. True when that setting has to be left out for this server.
+    public static func skipsTransactionTimeout(server: ServerVersion?) -> Bool {
+        guard let server, !server.isMariaDB else { return false }
+        return server.major < 17
+    }
+
+    /// Whether a statement only sets transaction_timeout, as pg_dump scripts do.
+    public static func isTransactionTimeoutSetting(_ statement: String) -> Bool {
+        statement.range(of: #"^\s*SET\s+(SESSION\s+)?transaction_timeout\s*(=|TO\b)[^;]*;?\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// pg_restore's report of the setting failing on an older server.
+    static let transactionTimeoutError = #"unrecognized configuration parameter "transaction_timeout""#
+
+    /// The note or hint after pg_restore met a server without transaction_timeout.
+    static func transactionTimeoutNote(tool: BackupToolVersion?, failed: Bool) -> String {
+        let name = tool.map { "pg_restore \($0)" } ?? "This pg_restore"
+        if failed {
+            return "\(name) sets transaction_timeout, which this server does not have, so a single-transaction restore stops at once. Turn off Single Transaction, or restore with pg_restore 16 or older."
+        }
+        return "\(name) sets transaction_timeout, which this server does not have. Only that setting failed; everything else was restored."
+    }
+
     /// A note when the dump tool's flavor differs from the server's (mysqldump against MariaDB or the reverse),
     /// which mostly works but can miss engine-specific features.
     public static func mysqlFlavorNote(tool: BackupToolVersion?, serverIsMariaDB: Bool) -> String? {
